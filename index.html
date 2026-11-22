@@ -1,0 +1,1579 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ระบบตรวจนับสินทรัพย์ถาวร</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"></link>
+  <!-- SheetJS for Excel Read/Export -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <!-- JSZip for Download All Images -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <!-- Chart.js for Dashboard -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- Html5-Qrcode Scanner -->
+  <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap');
+    body { font-family: 'Sarabun', sans-serif; background-color: #f1f5f9; }
+    .status-btn.active-ดี { background-color: #059669; color: white; border-color: #059669; }
+    .status-btn.active-ชำรุด { background-color: #d97706; color: white; border-color: #d97706; }
+    .status-btn.active-สูญหาย { background-color: #dc2626; color: white; border-color: #dc2626; }
+  </style>
+</head>
+<body class="pb-28">
+
+  <!-- Minimal Clean Header -->
+  <header class="bg-slate-900 text-white shadow-md sticky top-0 z-30 px-4 py-3">
+    <div class="max-w-4xl mx-auto flex items-center justify-between">
+      <div class="flex items-center space-x-2.5">
+        <div class="bg-blue-600 text-white p-2 rounded-lg flex items-center justify-center">
+          <i class="fa-solid fa-clipboard-check text-sm"></i>
+        </div>
+        <h1 class="text-sm font-bold tracking-wide">ระบบตรวจนับสินทรัพย์ถาวร</h1>
+      </div>
+      <div class="flex gap-1.5 flex-wrap items-center">
+        <button onclick="openTrashModal()" title="ถังขยะ Tab บริษัท" class="bg-slate-800 hover:bg-slate-700 text-amber-400 border border-slate-700 text-xs font-medium px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-all shadow-sm">
+          <i class="fa-solid fa-folder-minus"></i> <span class="hidden sm:inline">ถังขยะ Tab</span> (<span id="trashCountBadge">0</span>)
+        </button>
+        <button onclick="openImageTrashModal()" title="ถังขยะรูปถ่าย" class="bg-slate-800 hover:bg-slate-700 text-purple-400 border border-slate-700 text-xs font-medium px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-all shadow-sm">
+          <i class="fa-solid fa-image"></i> <span class="hidden sm:inline">ถังขยะรูป</span> (<span id="imgTrashCountBadge">0</span>)
+        </button>
+        <button onclick="downloadExcelTemplate()" title="โหลดไฟล์ฟอร์มสำหรับนำเข้า" class="bg-sky-600 hover:bg-sky-700 text-white text-xs font-medium px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-all shadow-sm">
+          <i class="fa-solid fa-file-arrow-down"></i> <span class="hidden sm:inline">โหลดฟอร์ม</span>
+        </button>
+        <label class="cursor-pointer bg-amber-600 hover:bg-amber-700 text-white text-xs font-medium px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-all shadow-sm">
+          <i class="fa-solid fa-file-import"></i> <span class="hidden sm:inline">นำเข้าไฟล์</span>
+          <input type="file" accept=".xlsx, .xls, .csv" onchange="importExcelFile(event)" class="hidden">
+        </label>
+        <button onclick="downloadAllImagesZip()" title="โหลดรูปทั้งหมด (.zip)" class="bg-violet-600 hover:bg-violet-700 text-white text-xs font-medium px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-all shadow-sm">
+          <i class="fa-solid fa-file-zipper"></i> <span class="hidden sm:inline">โหลดรูป</span>
+        </button>
+        <button onclick="exportToExcelClean()" title="ส่งออก Excel" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-all shadow-sm">
+          <i class="fa-solid fa-file-excel"></i> <span class="hidden sm:inline">Excel</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-4xl mx-auto px-4 pt-4 space-y-3.5">
+
+    <!-- Company Tabs, Rename & Delete Tab Buttons -->
+    <div class="bg-white rounded-xl p-2 shadow-sm border border-slate-200 flex items-center justify-between gap-2 overflow-x-auto">
+      <div id="companyTabsContainer" class="flex gap-1.5 overflow-x-auto"></div>
+      <div class="flex gap-1.5 flex-shrink-0">
+        <button onclick="renameCurrentCompany()" title="เปลี่ยนชื่อ Tab บริษัท" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1">
+          <i class="fa-solid fa-pen-to-square"></i> เปลี่ยนชื่อ Tab
+        </button>
+        <button onclick="confirmDeleteCurrentCompany()" title="ลบข้อมูลบริษัทนี้" class="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 transition-all">
+          <i class="fa-solid fa-trash-can"></i> ลบ Tab นี้
+        </button>
+      </div>
+    </div>
+
+    <!-- Metadata Form -->
+    <div class="bg-white rounded-xl p-3 shadow-sm border border-slate-200">
+      <div class="grid grid-cols-2 gap-3 text-xs">
+        <div>
+          <label class="block text-slate-500 font-medium mb-1">ผู้ตรวจนับ / จัดทำ (<span id="metaCompLabel1">SKYAI</span>)</label>
+          <input type="text" id="inspectorName" onchange="updateCompanyMeta('inspector', this.value)" placeholder="ระบุชื่อผู้ตรวจนับ..." class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-800 font-medium focus:outline-none focus:ring-1 focus:ring-blue-500">
+        </div>
+        <div>
+          <label class="block text-slate-500 font-medium mb-1">วันที่ตรวจนับ (<span id="metaCompLabel2">SKYAI</span>)</label>
+          <input type="date" id="inspectDate" onchange="updateCompanyMeta('date', this.value)" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-800 font-medium focus:outline-none focus:ring-1 focus:ring-blue-500">
+        </div>
+      </div>
+    </div>
+
+    <!-- Executive Summary Dashboard -->
+    <div class="bg-white rounded-xl p-3.5 shadow-sm border border-slate-200 space-y-3">
+      <div class="flex justify-between items-center text-xs">
+        <span class="font-bold text-slate-700"><i class="fa-solid fa-chart-pie text-blue-600 mr-1"></i> สรุปผลการตรวจนับ (<span id="activeCompanyLabel">SKYAI</span>)</span>
+        <span id="progressBadge" class="font-bold bg-blue-50 text-blue-700 px-2.5 py-0.5 rounded-full">0 / 0 (0%)</span>
+      </div>
+
+      <div class="grid grid-cols-4 gap-1.5 text-center text-xs">
+        <div class="bg-slate-50 p-2 rounded-lg border border-slate-100">
+          <div id="cntTotal" class="text-sm font-bold text-slate-800">0</div>
+          <div class="text-[10px] text-slate-500">ทั้งหมด</div>
+        </div>
+        <div class="bg-emerald-50 p-2 rounded-lg border border-emerald-100">
+          <div id="cntGood" class="text-sm font-bold text-emerald-600">0</div>
+          <div class="text-[10px] text-emerald-700">สภาพดี</div>
+        </div>
+        <div class="bg-amber-50 p-2 rounded-lg border border-amber-100">
+          <div id="cntDamage" class="text-sm font-bold text-amber-600">0</div>
+          <div class="text-[10px] text-amber-700">ชำรุด</div>
+        </div>
+        <div class="bg-red-50 p-2 rounded-lg border border-red-100">
+          <div id="cntLost" class="text-sm font-bold text-red-600">0</div>
+          <div class="text-[10px] text-red-700">สูญหาย</div>
+        </div>
+      </div>
+
+      <div class="flex justify-between items-center text-[11px] bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100">
+        <span class="text-slate-600">🎯 รายการสุ่ม: <strong id="cntSampled" class="text-slate-800">0</strong></span>
+        <span class="text-purple-700">➕ เพิ่มใหม่ (นอกสุ่ม): <strong id="cntExtra" class="text-purple-900">0</strong></span>
+      </div>
+
+      <div class="pt-2 border-t border-slate-100">
+        <div class="h-36 w-full relative">
+          <canvas id="dashboardChart"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- Search, Location Filter, Add Extra & Scanner Bar -->
+    <div class="bg-white rounded-xl p-3 shadow-sm border border-slate-200 space-y-2.5 sticky top-14 z-20">
+      <div class="flex gap-2 items-center flex-wrap sm:flex-nowrap">
+        <!-- ช่องค้นหาเลขทะเบียน / ชื่อ -->
+        <div class="relative flex-1 min-w-[180px]">
+          <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-slate-400 text-xs"></i>
+          <input type="text" id="searchInput" autofocus oninput="currentPage=1; renderList()" placeholder="พิมพ์เลขทะเบียน หรือยิงบาร์โค้ด..." class="w-full bg-slate-50 border border-slate-200 rounded-lg pl-8 pr-8 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono">
+          <button onclick="clearSearch()" id="btnClearSearch" class="hidden absolute right-3 top-2.5 text-slate-400 hover:text-slate-600">
+            <i class="fa-solid fa-xmark text-xs"></i>
+          </button>
+        </div>
+
+        <!-- ปุ่มเปิดกล่องเลือก Location -->
+        <div class="relative">
+          <button onclick="toggleLocationDropdown()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium px-3 py-2 rounded-lg flex items-center gap-1.5 transition-all border border-slate-200 whitespace-nowrap">
+            <i class="fa-solid fa-filter text-blue-600"></i> <span id="locationFilterLabel">สถานที่ทั้งหมด</span> <i class="fa-solid fa-chevron-down text-[10px]"></i>
+          </button>
+
+          <div id="locationDropdown" class="hidden absolute right-0 mt-1 w-64 bg-white rounded-xl shadow-xl border border-slate-200 p-3 z-30 space-y-2">
+            <div class="flex justify-between items-center text-xs font-bold border-b pb-1.5 text-slate-700">
+              <span>📍 กรองตามสถานที่ตั้ง</span>
+              <button onclick="resetLocationFilter()" class="text-[10px] text-blue-600 hover:underline">รีเซ็ต</button>
+            </div>
+            <div id="locationCheckboxesContainer" class="max-h-48 overflow-y-auto space-y-1 text-xs pr-1"></div>
+            <button onclick="toggleLocationDropdown()" class="w-full bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-medium py-1.5 rounded-lg">ตกลง</button>
+          </div>
+        </div>
+
+        <!-- ปุ่มเพิ่มรายการนอกสุ่ม -->
+        <button onclick="openAddExtraModal()" class="bg-purple-600 hover:bg-purple-700 text-white text-xs font-medium px-3 py-2 rounded-lg flex items-center gap-1 transition-all shadow-sm whitespace-nowrap">
+          <i class="fa-solid fa-plus"></i> <span>เพิ่มนอกสุ่ม</span>
+        </button>
+
+        <!-- ปุ่มเปิดสแกนเนอร์ -->
+        <button onclick="openScannerModal()" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium px-3 py-2 rounded-lg flex items-center gap-1 transition-all shadow-sm whitespace-nowrap">
+          <i class="fa-solid fa-qrcode"></i> <span>สแกน</span>
+        </button>
+      </div>
+
+      <!-- ปุ่มด่วนเมื่อพิมพ์เลขในช่องค้นหาแล้วไม่เจอในลิสต์ -->
+      <div id="quickAddFromSearchBanner" class="hidden bg-purple-50 border border-purple-200 rounded-lg px-3 py-2 flex items-center justify-between gap-2 text-xs">
+        <span class="text-purple-900 truncate">
+          ไม่พบเลข <strong id="searchedCodePreview" class="font-mono"></strong> ในรายการ
+        </span>
+        <button onclick="openAddExtraModal(document.getElementById('searchInput').value.trim())" class="bg-purple-600 hover:bg-purple-700 text-white text-[11px] font-bold px-2.5 py-1 rounded-md whitespace-nowrap shadow-sm">
+          <i class="fa-solid fa-plus mr-1"></i> เพิ่มเลขนี้เป็นรายการนอกสุ่ม
+        </button>
+      </div>
+
+      <!-- Active Filter Chips -->
+      <div id="activeFilterChips" class="flex gap-1.5 flex-wrap items-center text-xs"></div>
+
+      <!-- Status & Group Tabs -->
+      <div class="flex gap-1 overflow-x-auto pb-1 text-[11px]">
+        <button onclick="filterStatus('all')" id="tab-all" class="filter-tab px-3 py-1 rounded-md font-medium bg-blue-600 text-white whitespace-nowrap shadow-sm">ทั้งหมด (0)</button>
+        <button onclick="filterStatus('ยังไม่ตรวจ')" id="tab-ยังไม่ตรวจ" class="filter-tab px-3 py-1 rounded-md font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap">ยังไม่ตรวจ</button>
+        <button onclick="filterStatus('ดี')" id="tab-ดี" class="filter-tab px-3 py-1 rounded-md font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap">สภาพดี</button>
+        <button onclick="filterStatus('ชำรุด')" id="tab-ชำรุด" class="filter-tab px-3 py-1 rounded-md font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap">ชำรุด</button>
+        <button onclick="filterStatus('สูญหาย')" id="tab-สูญหาย" class="filter-tab px-3 py-1 rounded-md font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap">สูญหาย</button>
+        <button onclick="filterStatus('สุ่ม')" id="tab-สุ่ม" class="filter-tab px-3 py-1 rounded-md font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap">🎯 รายการสุ่ม</button>
+        <button onclick="filterStatus('นอกสุ่ม')" id="tab-นอกสุ่ม" class="filter-tab px-3 py-1 rounded-md font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap">➕ เพิ่มใหม่</button>
+      </div>
+    </div>
+
+    <!-- Asset Cards List & Pagination Container -->
+    <div id="assetList" class="space-y-2"></div>
+    <div id="paginationContainer" class="flex justify-center items-center gap-1 pt-2"></div>
+
+  </main>
+
+  <!-- Modal เพิ่มรายการนอกสุ่ม (เน้นกรอกแค่เลข + สถานที่ + สภาพ + รูป) -->
+  <div id="addExtraModal" class="fixed inset-0 bg-black/70 z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-xl max-w-sm w-full p-4 space-y-3 shadow-2xl">
+      <div class="flex justify-between items-center border-b pb-2">
+        <h3 class="font-bold text-xs text-purple-800"><i class="fa-solid fa-plus-circle mr-1 text-purple-600"></i> เพิ่มรายการนอกเหนือการสุ่ม</h3>
+        <button onclick="closeAddExtraModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+
+      <div class="space-y-2.5 text-xs">
+        <div>
+          <label class="block text-slate-600 font-bold mb-1">เลขทะเบียน / รหัสที่สแกนหรือพิมพ์ *</label>
+          <input type="text" id="extraCodeInput" oninput="checkDuplicateCodeOnInput(this.value)" placeholder="กรอกหรือสแกนเฉพาะเลข..." class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-xs font-mono font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500">
+          <div id="duplicateCodeWarning" class="hidden mt-1.5 bg-amber-50 border border-amber-300 text-amber-800 rounded-lg p-2 text-[11px] flex items-center justify-between gap-2">
+            <span>⚠️ พบรหัสนี้ในระบบแล้ว!</span>
+            <button onclick="jumpToExistingAsset()" class="bg-amber-600 hover:bg-amber-700 text-white px-2 py-0.5 rounded font-bold">ไปที่รายการเดิม</button>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-slate-600 font-medium mb-1">สถานที่ตั้ง (จำค่าล่าสุดให้อัตโนมัติ)</label>
+          <input type="text" id="extraLocationInput" list="locationSuggestions" placeholder="ระบุสถานที่ตั้ง..." class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-purple-500">
+          <datalist id="locationSuggestions"></datalist>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block text-slate-600 font-medium mb-1">สภาพทรัพย์สิน:</label>
+            <select id="extraStatusInput" class="w-full bg-slate-50 border border-slate-200 rounded-lg p-1.5 text-xs text-slate-800 font-medium focus:outline-none">
+              <option value="ดี">ดี</option>
+              <option value="ชำรุด">ชำรุด</option>
+              <option value="สูญหาย">สูญหาย</option>
+              <option value="">ยังไม่ระบุ</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-slate-600 font-medium mb-1">สถานะป้าย:</label>
+            <select id="extraTagInput" class="w-full bg-slate-50 border border-slate-200 rounded-lg p-1.5 text-xs text-slate-800 font-medium focus:outline-none">
+              <option value="มีป้าย">🏷️ มีป้ายสมบูรณ์</option>
+              <option value="ป้ายชำรุด">⚠️ ป้ายชำรุด</option>
+              <option value="ไม่มีป้าย">❌ ไม่มีป้าย</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-slate-600 font-medium mb-1">ถ่ายรูปแนบ (ถ้ามี):</label>
+          <label class="cursor-pointer bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 text-xs font-medium py-2 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all">
+            <i class="fa-solid fa-camera text-purple-600"></i> <span id="extraPhotoLabel">เลือกหรือถ่ายรูป</span>
+            <input type="file" id="extraImageInput" accept="image/*" capture="environment" multiple onchange="handleExtraImagePreview(event)" class="hidden">
+          </label>
+        </div>
+
+        <div>
+          <label class="block text-slate-600 font-medium mb-1">หมายเหตุ (ไม่บังคับ):</label>
+          <input type="text" id="extraRemarkInput" placeholder="รายละเอียดเพิ่มเติม..." class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none">
+        </div>
+      </div>
+
+      <div class="flex gap-2 pt-2 border-t">
+        <button onclick="closeAddExtraModal()" class="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-medium py-2 rounded-lg">ยกเลิก</button>
+        <button onclick="saveExtraAsset()" class="flex-1 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold py-2 rounded-lg shadow-sm">บันทึกรายการนอกสุ่ม</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Trash Modal (ถังขยะ Tab บริษัท) -->
+  <div id="trashModal" class="fixed inset-0 bg-black/70 z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-xl max-w-lg w-full p-4 space-y-3 shadow-2xl max-h-[85vh] flex flex-col">
+      <div class="flex justify-between items-center border-b pb-2">
+        <h3 class="font-bold text-xs text-slate-800"><i class="fa-solid fa-folder-minus mr-1 text-amber-600"></i> ถังขยะ Tab บริษัท</h3>
+        <button onclick="closeTrashModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div id="trashListContainer" class="flex-1 overflow-y-auto space-y-2 max-h-[350px]"></div>
+      <div class="flex justify-between items-center pt-2 border-t">
+        <button onclick="emptyTrash()" class="bg-red-50 hover:bg-red-100 text-red-600 text-xs font-medium px-3 py-1.5 rounded-lg border border-red-200">ล้างถังขยะทั้งหมด</button>
+        <button onclick="closeTrashModal()" class="bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-medium px-4 py-1.5 rounded-lg">ปิด</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Image Trash Modal (ถังขยะรูปถ่าย) -->
+  <div id="imageTrashModal" class="fixed inset-0 bg-black/70 z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-xl max-w-lg w-full p-4 space-y-3 shadow-2xl max-h-[85vh] flex flex-col">
+      <div class="flex justify-between items-center border-b pb-2">
+        <h3 class="font-bold text-xs text-slate-800"><i class="fa-solid fa-image mr-1 text-purple-600"></i> ถังขยะรูปถ่าย (รูปที่ถูกลบ)</h3>
+        <button onclick="closeImageTrashModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div id="imageTrashContainer" class="flex-1 overflow-y-auto grid grid-cols-2 sm:grid-cols-3 gap-2.5 max-h-[380px] p-1"></div>
+      <div class="flex justify-between items-center pt-2 border-t">
+        <button onclick="emptyImageTrash()" class="bg-red-50 hover:bg-red-100 text-red-600 text-xs font-medium px-3 py-1.5 rounded-lg border border-red-200">ล้างรูปในถังขยะทั้งหมด</button>
+        <button onclick="closeImageTrashModal()" class="bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-medium px-4 py-1.5 rounded-lg">ปิด</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scanner Modal with Fast Continuous Scan Popup, Not-Found Prompt & Photo Capture -->
+  <div id="scannerModal" class="fixed inset-0 bg-black/70 z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-xl max-w-sm w-full p-4 space-y-3 shadow-2xl relative">
+      <div class="flex justify-between items-center border-b pb-2">
+        <h3 class="font-bold text-xs text-slate-800"><i class="fa-solid fa-qrcode mr-1 text-blue-600"></i> สแกน QR Code (Hyper Speed)</h3>
+        <button onclick="closeScannerModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      
+      <div id="reader" class="w-full rounded-lg overflow-hidden bg-slate-900 min-h-[220px]"></div>
+
+      <!-- Popup เด้งขึ้นมาเมื่อสแกนเจอเลขในระบบ -->
+      <div id="scanQuickPopup" class="hidden absolute inset-x-3 top-16 bg-slate-900/95 text-white p-3.5 rounded-xl shadow-2xl space-y-2.5 z-40 border border-slate-700">
+        <div class="text-xs font-bold text-amber-400 flex items-center gap-1">
+          <i class="fa-solid fa-circle-check"></i> สแกนเจอ: <span id="popupAssetCode" class="font-mono text-white"></span>
+        </div>
+        <div id="popupAssetName" class="text-[11px] text-slate-300 truncate"></div>
+
+        <div>
+          <label class="block text-[10px] text-slate-400 mb-1">เลือกสภาพทรัพย์สิน:</label>
+          <div class="grid grid-cols-3 gap-1">
+            <button onclick="quickSetStatus('ดี')" class="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold py-1.5 rounded">ดี</button>
+            <button onclick="quickSetStatus('ชำรุด')" class="bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-bold py-1.5 rounded">ชำรุด</button>
+            <button onclick="quickSetStatus('สูญหาย')" class="bg-red-600 hover:bg-red-700 text-white text-[11px] font-bold py-1.5 rounded">สูญหาย</button>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block text-[10px] text-slate-400 mb-1">สถานะป้าย:</label>
+            <select id="popupTagSelect" class="w-full bg-slate-800 border border-slate-700 rounded p-1.5 text-[11px] text-white focus:outline-none">
+              <option value="มีป้าย">🏷️ มีป้ายสมบูรณ์</option>
+              <option value="ป้ายชำรุด">⚠️ ป้ายชำรุด</option>
+              <option value="ไม่มีป้าย">❌ ไม่มีป้าย</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-[10px] text-slate-400 mb-1">ถ่ายรูปด่วน:</label>
+            <label class="cursor-pointer bg-violet-600 hover:bg-violet-700 text-white text-[11px] font-bold py-1.5 px-2 rounded flex items-center justify-center gap-1 transition-all">
+              <i class="fa-solid fa-camera"></i> ถ่ายรูป
+              <input type="file" accept="image/*" capture="environment" onchange="quickAttachImage(event)" class="hidden">
+            </label>
+          </div>
+        </div>
+
+        <button onclick="closeQuickPopup()" class="w-full bg-slate-700 hover:bg-slate-600 text-slate-200 text-[11px] py-1.5 rounded font-medium">บันทึก / สแกนต่อ</button>
+      </div>
+
+      <!-- Popup เด้งขึ้นมาเมื่อสแกนได้เลข แต่ไม่พบในรายการสุ่ม -->
+      <div id="scanNotFoundPopup" class="hidden absolute inset-x-3 top-16 bg-slate-900/95 text-white p-3.5 rounded-xl shadow-2xl space-y-2.5 z-40 border border-purple-500">
+        <div class="text-xs font-bold text-purple-300 flex items-center gap-1">
+          <i class="fa-solid fa-circle-question"></i> ไม่พบเลขนี้ในรายการสุ่ม
+        </div>
+        <div class="bg-slate-800 rounded-lg px-3 py-2 text-center">
+          <div class="text-[10px] text-slate-400">เลขที่สแกนได้</div>
+          <div id="notFoundScannedCode" class="text-sm font-mono font-bold text-amber-300 select-all"></div>
+        </div>
+        <div class="flex gap-2">
+          <button onclick="closeNotFoundPopup()" class="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-200 text-[11px] py-2 rounded-lg font-medium">สแกนต่อ</button>
+          <button onclick="promoteScannedCodeToExtra()" class="flex-1 bg-purple-600 hover:bg-purple-700 text-white text-[11px] py-2 rounded-lg font-bold shadow">
+            <i class="fa-solid fa-plus mr-1"></i> เพิ่มเป็นรายการนอกสุ่ม
+          </button>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-between bg-slate-50 p-2 rounded-lg border border-slate-200 text-xs">
+        <span class="font-medium text-slate-700">🔄 โหมดสแกนต่อเนื่องความเร็วสูง</span>
+        <input type="checkbox" id="continuousScanToggle" checked class="w-4 h-4 accent-blue-600 cursor-pointer">
+      </div>
+
+      <div class="flex items-center gap-2 px-1">
+        <span class="text-[11px] text-slate-500 font-medium">ซูม:</span>
+        <button onclick="adjustZoom(-0.5)" class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs px-2.5 py-1 rounded font-bold">-</button>
+        <input type="range" id="zoomRange" min="1" max="5" step="0.5" value="2.0" oninput="onZoomChange(this.value)" class="flex-1 accent-blue-600">
+        <button onclick="adjustZoom(0.5)" class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs px-2.5 py-1 rounded font-bold">+</button>
+      </div>
+
+      <button onclick="closeScannerModal()" class="w-full bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-medium py-2 rounded-lg">ปิดกล้อง</button>
+    </div>
+  </div>
+
+  <!-- Multi-Image Gallery Modal -->
+  <div id="galleryModal" class="fixed inset-0 bg-black/70 z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-xl max-w-lg w-full p-3.5 space-y-3 shadow-2xl max-h-[90vh] flex flex-col">
+      <div class="flex justify-between items-center border-b pb-2 text-xs">
+        <h3 class="font-bold text-slate-800" id="galleryTitle">อัลบั้มรูปถ่าย</h3>
+        <button onclick="closeGallery()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="flex-1 flex justify-center items-center bg-slate-900 rounded-lg overflow-hidden p-2 min-h-[220px] relative">
+        <img id="activeGalleryImg" src="" class="max-h-[320px] object-contain rounded-md">
+        <a id="activeDownloadLink" href="" download="" class="absolute bottom-2.5 right-2.5 bg-blue-600 hover:bg-blue-700 text-white text-[11px] px-2.5 py-1 rounded-md flex items-center gap-1 shadow">
+          <i class="fa-solid fa-download"></i> โหลดรูปนี้
+        </a>
+      </div>
+      <div id="thumbnailContainer" class="flex gap-1.5 overflow-x-auto py-1 border-t"></div>
+      <button onclick="closeGallery()" class="w-full bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-medium py-2 rounded-lg">ปิด</button>
+    </div>
+  </div>
+
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyCetbaUQ0aL8sKkVE6xS_Jd6UYDrX2MWsk",
+      authDomain: "fixd-asset.firebaseapp.com",
+      projectId: "fixd-asset",
+      storageBucket: "fixd-asset.firebasestorage.app",
+      messagingSenderId: "316399921779",
+      appId: "1:316399921779:web:6e7a5bf9fbc769fd175806",
+      measurementId: "G-V0H508NTSH"
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+
+    let assets = [];
+    let trashAssets = [];
+    let imageTrash = [];
+    let currentCompany = 'SKYAI';
+    let currentFilter = 'all';
+    let selectedLocations = [];
+    let lastUsedLocation = '';
+    let pendingExtraImages = [];
+    let lastScannedRawCode = '';
+    let lastScanTimestamp = 0;
+    let duplicateMatchDocId = null;
+    let currentPage = 1;
+    const itemsPerPage = 25;
+    let myChart = null;
+    let html5QrCode = null;
+    let currentTrack = null;
+    let companyMetadata = {};
+    let scannedTargetDocId = null;
+
+    window.onload = function() {
+      initChart();
+
+      const savedMeta = localStorage.getItem('skyai_meta');
+      if (savedMeta) {
+        try { companyMetadata = JSON.parse(savedMeta); } catch(e){}
+      }
+
+      const savedLastLoc = localStorage.getItem('skyai_last_location');
+      if (savedLastLoc) {
+        lastUsedLocation = savedLastLoc;
+      }
+
+      db.collection("skyai_assets_v9_clean").onSnapshot((snapshot) => {
+        if (snapshot.empty) {
+          assets = [];
+        } else {
+          assets = [];
+          snapshot.forEach((doc) => {
+            const data = doc.data();
+            let imgs = data.images || [];
+            if (data.image && imgs.length === 0) imgs = [data.image];
+            const auditType = data.auditType || 'สุ่ม';
+            assets.push({ docId: doc.id, ...data, images: imgs, auditType });
+          });
+          assets.sort((a, b) => a.id - b.id);
+          
+          const companies = [...new Set(assets.map(a => a.company))];
+          companies.forEach(comp => {
+            if (!companyMetadata[comp]) {
+              companyMetadata[comp] = { inspector: "นายสุรพงษ์ ใจตุ้ย", date: "2026-11-04" };
+            }
+          });
+
+          if (!companies.includes(currentCompany) && companies.length > 0) {
+            currentCompany = companies[0];
+          }
+
+          updateCompanyTabs();
+          syncMetaUI();
+          renderLocationCheckboxes();
+          syncLocationDatalist();
+          renderList();
+          updateTabCounts();
+          updateDashboard();
+        }
+      });
+
+      db.collection("skyai_trash_v9").onSnapshot((snapshot) => {
+        trashAssets = [];
+        snapshot.forEach((doc) => {
+          trashAssets.push({ trashId: doc.id, ...doc.data() });
+        });
+        document.getElementById('trashCountBadge').innerText = trashAssets.length;
+      });
+
+      db.collection("skyai_image_trash_v9").onSnapshot((snapshot) => {
+        imageTrash = [];
+        snapshot.forEach((doc) => {
+          imageTrash.push({ trashImgId: doc.id, ...doc.data() });
+        });
+        document.getElementById('imgTrashCountBadge').innerText = imageTrash.length;
+      });
+    };
+
+    function updateCompanyMeta(field, value) {
+      if (!companyMetadata[currentCompany]) {
+        companyMetadata[currentCompany] = { inspector: "นายสุรพงษ์ ใจตุ้ย", date: "2026-11-04" };
+      }
+      companyMetadata[currentCompany][field] = value;
+      localStorage.setItem('skyai_meta', JSON.stringify(companyMetadata));
+    }
+
+    function syncMetaUI() {
+      if (!companyMetadata[currentCompany]) {
+        companyMetadata[currentCompany] = { inspector: "นายสุรพงษ์ ใจตุ้ย", date: "2026-11-04" };
+      }
+      document.getElementById('inspectorName').value = companyMetadata[currentCompany].inspector;
+      document.getElementById('inspectDate').value = companyMetadata[currentCompany].date;
+      document.getElementById('metaCompLabel1').innerText = currentCompany;
+      document.getElementById('metaCompLabel2').innerText = currentCompany;
+    }
+
+    function syncLocationDatalist() {
+      const companyAssets = assets.filter(a => a.company === currentCompany);
+      const locs = [...new Set(companyAssets.map(a => a.location).filter(l => l && l !== '-'))].sort();
+      const datalist = document.getElementById('locationSuggestions');
+      datalist.innerHTML = locs.map(l => `<option value="${l}"></option>`).join('');
+    }
+
+    // --- ระบบเพิ่มรายการนอกสุ่ม (เน้นเลขเป็นหลัก) ---
+    function openAddExtraModal(prefillCode = '') {
+      pendingExtraImages = [];
+      duplicateMatchDocId = null;
+      document.getElementById('duplicateCodeWarning').classList.add('hidden');
+      document.getElementById('extraCodeInput').value = String(prefillCode || '').trim();
+      document.getElementById('extraLocationInput').value = lastUsedLocation || '';
+      document.getElementById('extraStatusInput').value = 'ดี';
+      document.getElementById('extraTagInput').value = 'มีป้าย';
+      document.getElementById('extraRemarkInput').value = '';
+      document.getElementById('extraImageInput').value = '';
+      document.getElementById('extraPhotoLabel').innerText = 'เลือกหรือถ่ายรูป';
+      document.getElementById('addExtraModal').classList.remove('hidden');
+
+      const codeVal = document.getElementById('extraCodeInput').value;
+      if (codeVal) checkDuplicateCodeOnInput(codeVal);
+      setTimeout(() => document.getElementById('extraCodeInput').focus(), 50);
+    }
+
+    function closeAddExtraModal() {
+      pendingExtraImages = [];
+      duplicateMatchDocId = null;
+      document.getElementById('addExtraModal').classList.add('hidden');
+    }
+
+    function checkDuplicateCodeOnInput(rawVal) {
+      const normalized = String(rawVal || '').trim().toLowerCase();
+      const warnBox = document.getElementById('duplicateCodeWarning');
+      if (!normalized) {
+        duplicateMatchDocId = null;
+        warnBox.classList.add('hidden');
+        return;
+      }
+      const existing = assets.find(a => a.company === currentCompany && String(a.code || '').trim().toLowerCase() === normalized);
+      if (existing) {
+        duplicateMatchDocId = existing.docId;
+        warnBox.classList.remove('hidden');
+      } else {
+        duplicateMatchDocId = null;
+        warnBox.classList.add('hidden');
+      }
+    }
+
+    function jumpToExistingAsset() {
+      if (!duplicateMatchDocId) return;
+      const target = assets.find(a => a.docId === duplicateMatchDocId);
+      closeAddExtraModal();
+      if (target) {
+        document.getElementById('searchInput').value = target.code;
+        currentFilter = 'all';
+        currentPage = 1;
+        renderList();
+      }
+    }
+
+    function handleExtraImagePreview(event) {
+      const files = event.target.files;
+      if (!files || files.length === 0) return;
+      pendingExtraImages = [];
+      let processed = 0;
+
+      Array.from(files).forEach(file => {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          const img = new Image();
+          img.onload = function() {
+            const canvas = document.createElement('canvas');
+            let width = img.width, height = img.height;
+            const MAX_DIM = 700;
+            if (width > height && width > MAX_DIM) { height *= MAX_DIM / width; width = MAX_DIM; }
+            else if (height > MAX_DIM) { width *= MAX_DIM / height; height = MAX_DIM; }
+            canvas.width = width; canvas.height = height;
+            canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+            pendingExtraImages.push(canvas.toDataURL('image/jpeg', 0.65));
+            processed++;
+            if (processed === files.length) {
+              document.getElementById('extraPhotoLabel').innerText = `แนบรูปแล้ว (${pendingExtraImages.length} รูป)`;
+            }
+          };
+          img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function saveExtraAsset() {
+      const codeOnly = String(document.getElementById('extraCodeInput').value || '').trim();
+      if (!codeOnly) {
+        alert("กรุณากรอกหรือสแกนเลขทะเบียนก่อนครับ");
+        document.getElementById('extraCodeInput').focus();
+        return;
+      }
+
+      if (duplicateMatchDocId) {
+        if (!confirm("รหัสนี้มีอยู่ในรายการอยู่แล้ว ต้องการบันทึกรายการซ้ำอีกใบหรือไม่?")) {
+          return;
+        }
+      }
+
+      const locVal = String(document.getElementById('extraLocationInput').value || '').trim() || '-';
+      const statusVal = document.getElementById('extraStatusInput').value;
+      const tagVal = document.getElementById('extraTagInput').value;
+      const remarkVal = String(document.getElementById('extraRemarkInput').value || '').trim();
+
+      if (locVal !== '-') {
+        lastUsedLocation = locVal;
+        localStorage.setItem('skyai_last_location', lastUsedLocation);
+      }
+
+      const companyAssets = assets.filter(a => a.company === currentCompany);
+      const maxId = companyAssets.reduce((max, item) => Math.max(max, Number(item.id) || 0), 0);
+      const nextId = maxId + 1;
+      const docId = `extra_${currentCompany}_${nextId}_${Date.now()}`;
+
+      db.collection("skyai_assets_v9_clean").doc(docId).set({
+        id: nextId,
+        company: currentCompany,
+        category: 'นอกสุ่ม',
+        code: codeOnly,
+        name: `รายการนอกสุ่ม (${codeOnly})`,
+        location: locVal,
+        owner: (companyMetadata[currentCompany] && companyMetadata[currentCompany].inspector) || 'AC',
+        tag: tagVal,
+        status: statusVal,
+        images: pendingExtraImages,
+        remark: remarkVal,
+        auditType: 'นอกสุ่ม',
+        createdAt: new Date().toISOString()
+      }).then(() => {
+        closeAddExtraModal();
+      }).catch(err => alert("บันทึกรายการไม่สำเร็จ: " + err.message));
+    }
+
+    // --- ระบบจัดการกล่องกรอง Location แบบ Excel ---
+    function toggleLocationDropdown() {
+      const drop = document.getElementById('locationDropdown');
+      drop.classList.toggle('hidden');
+    }
+
+    function renderLocationCheckboxes() {
+      const companyAssets = assets.filter(a => a.company === currentCompany);
+      const locations = [...new Set(companyAssets.map(a => a.location || '-'))].sort();
+      const container = document.getElementById('locationCheckboxesContainer');
+
+      container.innerHTML = locations.map(loc => {
+        const count = companyAssets.filter(a => (a.location || '-') === loc).length;
+        const isChecked = selectedLocations.length === 0 || selectedLocations.includes(loc);
+        return `
+          <label class="flex items-center justify-between hover:bg-slate-50 p-1 rounded cursor-pointer">
+            <div class="flex items-center gap-2 truncate">
+              <input type="checkbox" value="${loc}" ${isChecked ? 'checked' : ''} onchange="onLocationCheckboxChange()" class="location-chk rounded text-blue-600 focus:ring-0">
+              <span class="truncate text-slate-700" title="${loc}">${loc}</span>
+            </div>
+            <span class="text-[10px] text-slate-400 font-mono">(${count})</span>
+          </label>
+        `;
+      }).join('');
+    }
+
+    function onLocationCheckboxChange() {
+      const checkboxes = document.querySelectorAll('.location-chk');
+      const allLocs = [...new Set(assets.filter(a => a.company === currentCompany).map(a => a.location || '-'))];
+      
+      selectedLocations = [];
+      checkboxes.forEach(chk => {
+        if (chk.checked) selectedLocations.push(chk.value);
+      });
+
+      if (selectedLocations.length === allLocs.length || selectedLocations.length === 0) {
+        selectedLocations = [];
+        document.getElementById('locationFilterLabel').innerText = 'สถานที่ทั้งหมด';
+      } else {
+        document.getElementById('locationFilterLabel').innerText = `เลือกแล้ว (${selectedLocations.length})`;
+      }
+
+      currentPage = 1;
+      renderList();
+    }
+
+    function resetLocationFilter() {
+      selectedLocations = [];
+      document.querySelectorAll('.location-chk').forEach(chk => chk.checked = true);
+      document.getElementById('locationFilterLabel').innerText = 'สถานที่ทั้งหมด';
+      currentPage = 1;
+      renderList();
+    }
+
+    async function renameCurrentCompany() {
+      const newName = prompt(`เปลี่ยนชื่อบริษัทสำหรับ Tab "${currentCompany}" เป็น:`, currentCompany);
+      if (!newName || !newName.trim() || newName.trim() === currentCompany) return;
+
+      const sanitizedNewName = newName.trim();
+      const companyAssets = assets.filter(a => a.company === currentCompany);
+
+      if (companyAssets.length === 0) {
+        alert("ไม่พบรายการทรัพย์สินใน Tab นี้");
+        return;
+      }
+
+      if (companyMetadata[currentCompany]) {
+        companyMetadata[sanitizedNewName] = { ...companyMetadata[currentCompany] };
+        delete companyMetadata[currentCompany];
+      } else {
+        companyMetadata[sanitizedNewName] = { inspector: "นายสุรพงษ์ ใจตุ้ย", date: "2026-11-04" };
+      }
+      localStorage.setItem('skyai_meta', JSON.stringify(companyMetadata));
+
+      try {
+        const chunkSize = 400;
+        for (let i = 0; i < companyAssets.length; i += chunkSize) {
+          const chunk = companyAssets.slice(i, i + chunkSize);
+          const batch = db.batch();
+          chunk.forEach(item => {
+            const docRef = db.collection("skyai_assets_v9_clean").doc(item.docId);
+            batch.update(docRef, { company: sanitizedNewName });
+          });
+          await batch.commit();
+        }
+
+        currentCompany = sanitizedNewName;
+        updateCompanyTabs();
+        syncMetaUI();
+        renderLocationCheckboxes();
+        syncLocationDatalist();
+        renderList();
+        updateTabCounts();
+        updateDashboard();
+        alert(`เปลี่ยนชื่อ Tab เป็น "${sanitizedNewName}" เรียบร้อยแล้ว!`);
+      } catch (err) {
+        alert("เกิดข้อผิดพลาดในการเปลี่ยนชื่อ: " + err.message);
+      }
+    }
+
+    function removeSingleImage(docId, imgIndex) {
+      if (!confirm("ต้องการย้ายรูปถ่ายนี้ไปยังถังขยะรูปถ่ายใช่หรือไม่?")) return;
+      const target = assets.find(a => a.docId === docId);
+      if (target && target.images && target.images[imgIndex]) {
+        const deletedImgUrl = target.images[imgIndex];
+        const updatedImgs = target.images.filter((_, idx) => idx !== imgIndex);
+
+        db.collection("skyai_image_trash_v9").add({
+          assetDocId: docId,
+          assetCode: target.code,
+          assetName: target.name,
+          company: target.company,
+          imageDataUrl: deletedImgUrl,
+          deletedAt: new Date().toISOString()
+        });
+
+        updateAssetField(docId, 'images', updatedImgs);
+        if (updatedImgs.length === 0) closeGallery();
+        else openGallery(docId);
+      }
+    }
+
+    function openImageTrashModal() {
+      const container = document.getElementById('imageTrashContainer');
+      if (imageTrash.length === 0) {
+        container.innerHTML = `<div class="col-span-full text-center text-slate-400 text-xs py-8">ไม่มีรูปถ่ายในถังขยะ</div>`;
+      } else {
+        container.innerHTML = imageTrash.map(item => `
+          <div class="bg-slate-50 border border-slate-200 rounded-lg p-2 flex flex-col space-y-1.5 shadow-sm relative">
+            <div class="w-full h-24 bg-slate-900 rounded overflow-hidden flex items-center justify-center">
+              <img src="${item.imageDataUrl}" class="w-full h-full object-cover">
+            </div>
+            <div class="text-[10px] text-slate-700 truncate font-bold">${item.assetCode}</div>
+            <div class="text-[9px] text-slate-500 truncate">${item.assetName}</div>
+            <button onclick="restoreSingleImage('${item.trashImgId}')" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-medium py-1 rounded flex items-center justify-center gap-1">
+              <i class="fa-solid fa-rotate-left"></i> กู้คืนรูปนี้
+            </button>
+          </div>
+        `).join('');
+      }
+      document.getElementById('imageTrashModal').classList.remove('hidden');
+    }
+
+    function closeImageTrashModal() {
+      document.getElementById('imageTrashModal').classList.add('hidden');
+    }
+
+    function restoreSingleImage(trashImgId) {
+      const item = imageTrash.find(i => i.trashImgId === trashImgId);
+      if (!item) return;
+
+      const targetAsset = assets.find(a => a.docId === item.assetDocId);
+      if (!targetAsset) {
+        alert("ไม่สามารถกู้คืนได้ เนื่องจากสินทรัพย์หลักถูกลบไปแล้ว");
+        return;
+      }
+
+      const updatedImgs = [...(targetAsset.images || []), item.imageDataUrl];
+      db.collection("skyai_assets_v9_clean").doc(item.assetDocId).update({
+        images: updatedImgs
+      }).then(() => {
+        db.collection("skyai_image_trash_v9").doc(trashImgId).delete();
+        alert(`กู้คืนรูปถ่ายกลับไปยังรายการ ${item.assetCode} สำเร็จ!`);
+      }).catch(err => alert("เกิดข้อผิดพลาด: " + err.message));
+    }
+
+    function emptyImageTrash() {
+      if (!confirm("⚠️ คำเตือน: ต้องการล้างรูปถ่ายในถังขยะทั้งหมดถาวรใช่หรือไม่?")) return;
+      const batch = db.batch();
+      imageTrash.forEach(item => {
+        batch.delete(db.collection("skyai_image_trash_v9").doc(item.trashImgId));
+      });
+      batch.commit().then(() => {
+        alert("ล้างถังขยะรูปถ่ายเรียบร้อยแล้ว");
+        closeImageTrashModal();
+      });
+    }
+
+    function openTrashModal() {
+      const container = document.getElementById('trashListContainer');
+      if (trashAssets.length === 0) {
+        container.innerHTML = `<div class="text-center text-slate-400 text-xs py-8">ถังขยะ Tab ว่างเปล่า</div>`;
+      } else {
+        const grouped = {};
+        trashAssets.forEach(item => {
+          if (!grouped[item.company]) grouped[item.company] = [];
+          grouped[item.company].push(item);
+        });
+
+        let html = '';
+        for (let comp in grouped) {
+          const totalImgs = grouped[comp].reduce((sum, i) => sum + (i.images ? i.images.length : 0), 0);
+          html += `
+            <div class="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2">
+              <div class="flex justify-between items-center text-xs font-bold text-slate-700">
+                <div>
+                  <span>🏢 บริษัท: ${comp} (${grouped[comp].length} รายการ)</span>
+                  <span class="text-[10px] text-violet-600 ml-1.5 font-semibold">📸 มีรูปถ่าย ${totalImgs} รูป</span>
+                </div>
+                <button onclick="restoreCompany('${comp}')" class="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] px-2.5 py-1 rounded shadow-sm">
+                  <i class="fa-solid fa-rotate-left mr-1"></i> กู้คืน Tab นี้
+                </button>
+              </div>
+            </div>
+          `;
+        }
+        container.innerHTML = html;
+      }
+      document.getElementById('trashModal').classList.remove('hidden');
+    }
+
+    function closeTrashModal() {
+      document.getElementById('trashModal').classList.add('hidden');
+    }
+
+    function restoreCompany(compName) {
+      if (!confirm(`ต้องการกู้คืนข้อมูลบริษัท "${compName}" พร้อมรูปถ่ายทั้งหมดกลับมาใช่หรือไม่?`)) return;
+      const itemsToRestore = trashAssets.filter(item => item.company === compName);
+      const batch = db.batch();
+
+      itemsToRestore.forEach(item => {
+        const originalDocId = item.originalDocId || `asset_${item.company}_${item.id}_${Date.now()}`;
+        const mainRef = db.collection("skyai_assets_v9_clean").doc(originalDocId);
+        const trashRef = db.collection("skyai_trash_v9").doc(item.trashId);
+
+        const restoreData = { ...item };
+        delete restoreData.trashId;
+        delete restoreData.originalDocId;
+        delete restoreData.deletedAt;
+
+        batch.set(mainRef, restoreData);
+        batch.delete(trashRef);
+      });
+
+      batch.commit().then(() => {
+        alert(`กู้คืนบริษัท "${compName}" และรูปถ่ายทั้งหมดสำเร็จเรียบร้อย!`);
+        currentCompany = compName;
+        closeTrashModal();
+      }).catch(err => alert("กู้คืนไม่สำเร็จ: " + err.message));
+    }
+
+    function emptyTrash() {
+      if (!confirm("⚠️ คำเตือน: คุณต้องการล้างถังขยะทั้งหมดถาวรใช่หรือไม่?")) return;
+      const batch = db.batch();
+      trashAssets.forEach(item => {
+        batch.delete(db.collection("skyai_trash_v9").doc(item.trashId));
+      });
+      batch.commit().then(() => {
+        alert("ล้างถังขยะเรียบร้อยแล้ว");
+        closeTrashModal();
+      });
+    }
+
+    function downloadExcelTemplate() {
+      const templateData = [
+        { "ลำดับ": 1, "ประเภทสินทรัพย์": "เครื่องใช้สำนักงาน", "เลขทะเบียนทรัพย์สิน": "OE-20260100001", "ชื่อทรัพย์สิน": "ตัวอย่าง โต๊ะทำงานไม้", "สถานที่ตั้ง": "อาคารสำนักงาน ชั้น 1", "ผู้รับผิดชอบ": "AC" }
+      ];
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(templateData);
+      XLSX.utils.book_append_sheet(wb, ws, "Template_Import");
+      XLSX.writeFile(wb, "Asset_Import_Template.xlsx");
+    }
+
+    function confirmDeleteCurrentCompany() {
+      const companyAssets = assets.filter(a => a.company === currentCompany);
+      if (companyAssets.length === 0) return alert("ไม่มีข้อมูลในบริษัทนี้ให้ลบครับ");
+
+      if (!confirm(`⚠️ ยืนยันการลบ Tab บริษัท "${currentCompany}" (${companyAssets.length} รายการ) ไปยังถังขยะ?`)) return;
+
+      const batch = db.batch();
+      companyAssets.forEach(item => {
+        const mainRef = db.collection("skyai_assets_v9_clean").doc(item.docId);
+        const trashRef = db.collection("skyai_trash_v9").doc();
+        batch.set(trashRef, { ...item, originalDocId: item.docId, deletedAt: new Date().toISOString() });
+        batch.delete(mainRef);
+      });
+
+      batch.commit().then(() => {
+        delete companyMetadata[currentCompany];
+        alert(`ย้ายข้อมูลบริษัท "${currentCompany}" ไปยังถังขยะเรียบร้อยแล้ว`);
+        const remaining = [...new Set(assets.map(a => a.company))].filter(c => c !== currentCompany);
+        currentCompany = remaining.length > 0 ? remaining[0] : 'SKYAI';
+        updateCompanyTabs();
+        syncMetaUI();
+        renderLocationCheckboxes();
+        syncLocationDatalist();
+        renderList();
+        updateTabCounts();
+        updateDashboard();
+      }).catch(err => alert("ลบไม่สำเร็จ: " + err.message));
+    }
+
+    // --- HYPER SPEED SCANNER ---
+    function openScannerModal() {
+      document.getElementById('scannerModal').classList.remove('hidden');
+      document.getElementById('zoomRange').value = 2.0; 
+      document.getElementById('scanQuickPopup').classList.add('hidden');
+      document.getElementById('scanNotFoundPopup').classList.add('hidden');
+      lastScannedRawCode = '';
+      lastScanTimestamp = 0;
+      
+      if (!html5QrCode) {
+        html5QrCode = new Html5Qrcode("reader");
+      }
+
+      const isContinuous = document.getElementById('continuousScanToggle').checked;
+
+      const qrConfig = { 
+        fps: 60, 
+        qrbox: { width: 320, height: 320 },
+        aspectRatio: 1.0,
+        experimentalFeatures: {
+          useBarCodeDetectorIfSupported: true
+        },
+        videoConstraints: {
+          facingMode: "environment",
+          focusMode: "continuous",
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
+        }
+      };
+
+      html5QrCode.start(
+        { facingMode: "environment" },
+        qrConfig,
+        (decodedText) => {
+          const cleanCode = String(decodedText || '').trim();
+          if (!cleanCode) return;
+          const lowerCode = cleanCode.toLowerCase();
+
+          // กันสแกนรหัสเดิมซ้ำติดกันถี่เกินไป
+          const now = Date.now();
+          if (cleanCode === lastScannedRawCode && (now - lastScanTimestamp) < 1800) return;
+
+          const found = assets.find(a =>
+            (a.company === currentCompany || true) &&
+            (String(a.code || '').trim().toLowerCase() === lowerCode ||
+             (cleanCode.length >= 4 && String(a.code || '').toLowerCase().includes(lowerCode)))
+          );
+
+          lastScannedRawCode = cleanCode;
+          lastScanTimestamp = now;
+
+          if (found) {
+            if (found.company !== currentCompany) {
+              switchCompany(found.company);
+            }
+            
+            try {
+              const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+              const osc = audioCtx.createOscillator();
+              const gain = audioCtx.createGain();
+              osc.type = "sine"; osc.frequency.value = 800;
+              gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+              osc.connect(gain); gain.connect(audioCtx.destination);
+              osc.start(); osc.stop(audioCtx.currentTime + 0.1);
+            } catch(e){}
+
+            if (isContinuous) {
+              html5QrCode.pause();
+              scannedTargetDocId = found.docId;
+              document.getElementById('popupAssetCode').innerText = found.code;
+              document.getElementById('popupAssetName').innerText = found.name;
+              document.getElementById('scanQuickPopup').classList.remove('hidden');
+            } else {
+              closeScannerModal();
+              document.getElementById('searchInput').value = found.code;
+              renderList();
+            }
+          } else {
+            // สแกนได้เลข แต่ไม่อยู่ในรายการสุ่ม -> เด้งปุ่มเพิ่มเป็นรายการนอกสุ่ม
+            try {
+              const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+              const osc = audioCtx.createOscillator();
+              const gain = audioCtx.createGain();
+              osc.type = "triangle"; osc.frequency.value = 520;
+              gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+              osc.connect(gain); gain.connect(audioCtx.destination);
+              osc.start(); osc.stop(audioCtx.currentTime + 0.12);
+            } catch(e){}
+
+            if (html5QrCode && html5QrCode.isScanning) {
+              try { html5QrCode.pause(); } catch(e){}
+            }
+            document.getElementById('notFoundScannedCode').innerText = cleanCode;
+            document.getElementById('scanNotFoundPopup').classList.remove('hidden');
+          }
+        },
+        (errorMessage) => {}
+      ).then(() => {
+        try {
+          const videoElement = document.querySelector('#reader video');
+          if (videoElement && videoElement.srcObject) {
+            currentTrack = videoElement.srcObject.getVideoTracks()[0];
+            currentTrack.applyConstraints({ advanced: [{ zoom: 2.0 }] }).catch(err => {});
+          }
+        } catch (e) {}
+      }).catch(err => alert("ไม่สามารถเปิดกล้องได้: " + err));
+    }
+
+    function promoteScannedCodeToExtra() {
+      const codeOnly = String(document.getElementById('notFoundScannedCode').innerText || '').trim();
+      closeScannerModal();
+      openAddExtraModal(codeOnly);
+    }
+
+    function closeNotFoundPopup() {
+      document.getElementById('scanNotFoundPopup').classList.add('hidden');
+      if (html5QrCode) {
+        try { html5QrCode.resume(); } catch(e) {}
+      }
+    }
+
+    function quickSetStatus(status) {
+      if (!scannedTargetDocId) return;
+      const tagVal = document.getElementById('popupTagSelect').value;
+      
+      db.collection("skyai_assets_v9_clean").doc(scannedTargetDocId).update({
+        status: status,
+        tag: tagVal
+      }).then(() => {
+        closeQuickPopup();
+      }).catch(err => alert("บันทึกไม่สำเร็จ: " + err.message));
+    }
+
+    function quickAttachImage(event) {
+      if (!scannedTargetDocId) return;
+      const files = event.target.files;
+      if (!files || files.length === 0) return;
+
+      const target = assets.find(a => a.docId === scannedTargetDocId);
+      if (!target) return;
+
+      let currentImgs = [...(target.images || [])];
+      const file = files[0];
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const img = new Image();
+        img.onload = function() {
+          const canvas = document.createElement('canvas');
+          let width = img.width, height = img.height;
+          const MAX_DIM = 700;
+          if (width > height && width > MAX_DIM) { height *= MAX_DIM / width; width = MAX_DIM; }
+          else if (height > MAX_DIM) { width *= MAX_DIM / height; height = MAX_DIM; }
+          canvas.width = width; canvas.height = height;
+          canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+
+          currentImgs.push(canvas.toDataURL('image/jpeg', 0.65));
+          db.collection("skyai_assets_v9_clean").doc(scannedTargetDocId).update({
+            images: currentImgs
+          }).then(() => {
+            alert("บันทึกรูปถ่ายด่วนสำเร็จ!");
+          });
+        };
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+      event.target.value = '';
+    }
+
+    function closeQuickPopup() {
+      scannedTargetDocId = null;
+      document.getElementById('scanQuickPopup').classList.add('hidden');
+      if (html5QrCode) {
+        try { html5QrCode.resume(); } catch(e) {}
+      }
+    }
+
+    function onZoomChange(value) {
+      if (currentTrack) {
+        const capabilities = currentTrack.getCapabilities();
+        if (capabilities && capabilities.zoom) {
+          currentTrack.applyConstraints({ advanced: [{ zoom: parseFloat(value) }] }).catch(err => {});
+        }
+      }
+    }
+
+    function adjustZoom(amount) {
+      const slider = document.getElementById('zoomRange');
+      let newVal = parseFloat(slider.value) + amount;
+      if (newVal < 1) newVal = 1; if (newVal > 5) newVal = 5;
+      slider.value = newVal;
+      onZoomChange(newVal);
+    }
+
+    function closeScannerModal() {
+      currentTrack = null;
+      document.getElementById('scanQuickPopup').classList.add('hidden');
+      document.getElementById('scanNotFoundPopup').classList.add('hidden');
+      scannedTargetDocId = null;
+      if (html5QrCode && html5QrCode.isScanning) {
+        html5QrCode.stop().then(() => {
+          document.getElementById('scannerModal').classList.add('hidden');
+        }).catch(() => document.getElementById('scannerModal').classList.add('hidden'));
+      } else {
+        document.getElementById('scannerModal').classList.add('hidden');
+      }
+    }
+
+    function importExcelFile(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          const data = new Uint8Array(e.target.result);
+          const workbook = XLSX.read(data, { type: 'array' });
+          const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+          const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false, defval: '' });
+
+          let companyName = file.name.replace(/\.[^/.]+$/, "").trim();
+          let importedCount = 0;
+          const batch = db.batch();
+          const baseTime = Date.now();
+
+          for (let i = 0; i < jsonData.length; i++) {
+            const row = jsonData[i];
+            if (!row || row.length < 3) continue;
+
+            let col0 = String(row[0] || '').trim();
+            let col1 = String(row[1] || '').trim();
+            let col2 = String(row[2] || '').trim();
+            let col3 = String(row[3] || '').trim();
+            let col4 = String(row[4] || '-').trim();
+            let col5 = String(row[5] || 'AC').trim();
+
+            if (col2 === '' || col0 === 'ลำดับ' || col1.includes('ประเภท') || col2.includes('เลขทะเบียน')) {
+              continue;
+            }
+
+            importedCount++;
+            const docRef = db.collection("skyai_assets_v9_clean").doc(`asset_${companyName}_${importedCount}_${baseTime}_${i}`);
+            batch.set(docRef, {
+              id: importedCount,
+              company: companyName,
+              category: col1,
+              code: col2,
+              name: col3,
+              location: col4,
+              owner: col5,
+              tag: 'มีป้าย',
+              status: '',
+              images: [],
+              remark: '',
+              auditType: 'สุ่ม'
+            });
+          }
+
+          if (importedCount > 0) {
+            batch.commit().then(() => {
+              companyMetadata[companyName] = { inspector: "นายสุรพงษ์ ใจตุ้ย", date: "2026-11-04" };
+              localStorage.setItem('skyai_meta', JSON.stringify(companyMetadata));
+              alert(`นำเข้าข้อมูลบริษัท "${companyName}" สำเร็จทั้งหมด ${importedCount} รายการครบถ้วน!`);
+              switchCompany(companyName);
+            }).catch(err => {
+              alert("บันทึกลงฐานข้อมูลไม่สำเร็จ: " + err.message);
+            });
+          } else {
+            alert("ไม่พบข้อมูลรหัสทะเบียนทรัพย์สินในไฟล์ กรุณาตรวจสอบรูปแบบคอลัมน์");
+          }
+        } catch (err) {
+          alert("เกิดข้อผิดพลาดในการอ่านไฟล์: " + err.message);
+        }
+      };
+      reader.readAsArrayBuffer(file);
+      event.target.value = '';
+    }
+
+    function updateCompanyTabs() {
+      const companies = [...new Set(assets.map(a => a.company))];
+      if (companies.length === 0) companies.push('SKYAI');
+
+      const container = document.getElementById('companyTabsContainer');
+      container.innerHTML = companies.map(comp => `
+        <button onclick="switchCompany('${comp}')" id="company-tab-${comp}" class="company-tab px-3 py-1.5 rounded-lg font-bold text-xs ${currentCompany === comp ? 'bg-slate-900 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'} whitespace-nowrap transition-all">
+          🏢 ${comp} (${assets.filter(a => a.company === comp).length})
+        </button>
+      `).join('');
+      document.getElementById('activeCompanyLabel').innerText = currentCompany;
+    }
+
+    function switchCompany(company) {
+      currentCompany = company;
+      currentPage = 1;
+      selectedLocations = [];
+      updateCompanyTabs();
+      syncMetaUI();
+      renderLocationCheckboxes();
+      syncLocationDatalist();
+      renderList();
+      updateTabCounts();
+      updateDashboard();
+    }
+
+    function updateAssetField(docId, field, value) {
+      db.collection("skyai_assets_v9_clean").doc(docId).update({ [field]: value }).catch(err => alert("บันทึกไม่สำเร็จ: " + err.message));
+    }
+
+    function setStatus(docId, status, currentStatus) {
+      updateAssetField(docId, 'status', currentStatus === status ? '' : status);
+    }
+
+    function setTag(docId, val) { updateAssetField(docId, 'tag', val); }
+    function setRemark(docId, val) { updateAssetField(docId, 'remark', val); }
+
+    function compressAndAttachImage(docId, event) {
+      const files = event.target.files;
+      if (!files || files.length === 0) return;
+      const target = assets.find(a => a.docId === docId);
+      if (!target) return;
+
+      let currentImgs = [...(target.images || [])];
+      let processedCount = 0;
+
+      Array.from(files).forEach(file => {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          const img = new Image();
+          img.onload = function() {
+            const canvas = document.createElement('canvas');
+            let width = img.width, height = img.height;
+            const MAX_DIM = 700;
+            if (width > height && width > MAX_DIM) { height *= MAX_DIM / width; width = MAX_DIM; }
+            else if (height > MAX_DIM) { width *= MAX_DIM / height; height = MAX_DIM; }
+            canvas.width = width; canvas.height = height;
+            canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+
+            currentImgs.push(canvas.toDataURL('image/jpeg', 0.65));
+            processedCount++;
+            if (processedCount === files.length) {
+              db.collection("skyai_assets_v9_clean").doc(docId).update({ images: currentImgs });
+            }
+          };
+          img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function openGallery(docId) {
+      const item = assets.find(a => a.docId === docId);
+      if (!item || !item.images || item.images.length === 0) return;
+      document.getElementById('galleryTitle').innerText = `อัลบั้มรูปถ่าย: ${item.code} (${item.images.length} รูป)`;
+      const thumbContainer = document.getElementById('thumbnailContainer');
+      thumbContainer.innerHTML = '';
+
+      item.images.forEach((imgSrc, idx) => {
+        const thumb = document.createElement('div');
+        thumb.className = `relative cursor-pointer flex-shrink-0 w-14 h-14 rounded-lg overflow-hidden border-2 ${idx === 0 ? 'border-blue-600 scale-105' : 'border-transparent opacity-70'} transition-all`;
+        thumb.onclick = () => selectGalleryImg(imgSrc, item.code, idx, thumbContainer);
+        thumb.innerHTML = `
+          <img src="${imgSrc}" class="w-full h-full object-cover">
+          <button onclick="event.stopPropagation(); removeSingleImage('${docId}', ${idx})" title="ลบรูปนี้" class="absolute top-0 right-0 bg-red-600 text-white text-[9px] w-4 h-4 flex items-center justify-center rounded-bl"><i class="fa-solid fa-xmark"></i></button>
+        `;
+        thumbContainer.appendChild(thumb);
+      });
+      selectGalleryImg(item.images[0], item.code, 0, thumbContainer);
+      document.getElementById('galleryModal').classList.remove('hidden');
+    }
+
+    function selectGalleryImg(imgSrc, code, index, container) {
+      document.getElementById('activeGalleryImg').src = imgSrc;
+      const downloadBtn = document.getElementById('activeDownloadLink');
+      downloadBtn.href = imgSrc; downloadBtn.download = `${code}_${index + 1}.jpg`;
+      if (container) {
+        Array.from(container.children).forEach((child, i) => {
+          child.className = i === index ? "relative cursor-pointer flex-shrink-0 w-14 h-14 rounded-lg overflow-hidden border-2 border-blue-600 scale-105 transition-all" : "relative cursor-pointer flex-shrink-0 w-14 h-14 rounded-lg overflow-hidden border-2 border-transparent opacity-70 transition-all";
+        });
+      }
+    }
+
+    function closeGallery() { document.getElementById('galleryModal').classList.add('hidden'); }
+
+    async function downloadAllImagesZip() {
+      const zip = new JSZip();
+      let totalImages = 0;
+      assets.filter(a => a.company === currentCompany).forEach(item => {
+        if (item.images) {
+          item.images.forEach((img, idx) => {
+            totalImages++;
+            zip.file(`${item.code}_${idx + 1}.jpg`, img.replace(/^data:image\/jpeg;base64,/, ""), { base64: true });
+          });
+        }
+      });
+      if (totalImages === 0) return alert("ยังไม่มีรูปถ่ายในระบบของบริษัทนี้ครับ");
+      alert(`กำลังเตรียมไฟล์ ZIP (${totalImages} รูป)...`);
+      const content = await zip.generateAsync({ type: "blob" });
+      const url = window.URL.createObjectURL(content);
+      const a = document.createElement("a");
+      a.href = url; a.download = `Asset_Photos_${currentCompany}.zip`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    }
+
+    function initChart() {
+      const ctx = document.getElementById('dashboardChart').getContext('2d');
+      myChart = new Chart(ctx, {
+        type: 'bar',
+        data: { labels: ['สภาพดี', 'ชำรุด', 'สูญหาย'], datasets: [{ label: 'จำนวน', data: [0, 0, 0], backgroundColor: ['#059669', '#d97706', '#dc2626'] }] },
+        options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } }, plugins: { legend: { display: false } } }
+      });
+    }
+
+    function updateDashboard() {
+      const companyAssets = assets.filter(a => a.company === currentCompany);
+      const total = companyAssets.length;
+      const good = companyAssets.filter(a => a.status === 'ดี').length;
+      const damage = companyAssets.filter(a => a.status === 'ชำรุด').length;
+      const lost = companyAssets.filter(a => a.status === 'สูญหาย').length;
+      const sampled = companyAssets.filter(a => (a.auditType || 'สุ่ม') === 'สุ่ม').length;
+      const extra = companyAssets.filter(a => a.auditType === 'นอกสุ่ม').length;
+      const done = good + damage + lost;
+      const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+
+      document.getElementById('cntTotal').innerText = total;
+      document.getElementById('cntGood').innerText = good;
+      document.getElementById('cntDamage').innerText = damage;
+      document.getElementById('cntLost').innerText = lost;
+      document.getElementById('cntSampled').innerText = sampled;
+      document.getElementById('cntExtra').innerText = extra;
+      document.getElementById('progressBadge').innerText = `${done} / ${total} (${pct}%)`;
+
+      if (myChart) {
+        myChart.data.datasets[0].data = [good, damage, lost];
+        myChart.update();
+      }
+    }
+
+    function filterStatus(status) {
+      currentFilter = status;
+      currentPage = 1;
+      document.querySelectorAll('.filter-tab').forEach(btn => btn.className = "filter-tab px-3 py-1 rounded-md font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap");
+      document.getElementById('tab-' + status).className = "filter-tab px-3 py-1 rounded-md font-medium bg-blue-600 text-white whitespace-nowrap shadow-sm";
+      renderList();
+    }
+
+    function updateTabCounts() {
+      const companyAssets = assets.filter(a => a.company === currentCompany);
+      document.getElementById('tab-all').innerText = `ทั้งหมด (${companyAssets.length})`;
+      document.getElementById('tab-ยังไม่ตรวจ').innerText = `ยังไม่ตรวจ (${companyAssets.filter(a => !a.status).length})`;
+      document.getElementById('tab-ดี').innerText = `สภาพดี (${companyAssets.filter(a => a.status === 'ดี').length})`;
+      document.getElementById('tab-ชำรุด').innerText = `ชำรุด (${companyAssets.filter(a => a.status === 'ชำรุด').length})`;
+      document.getElementById('tab-สูญหาย').innerText = `สูญหาย (${companyAssets.filter(a => a.status === 'สูญหาย').length})`;
+      document.getElementById('tab-สุ่ม').innerText = `🎯 รายการสุ่ม (${companyAssets.filter(a => (a.auditType || 'สุ่ม') === 'สุ่ม').length})`;
+      document.getElementById('tab-นอกสุ่ม').innerText = `➕ เพิ่มใหม่ (${companyAssets.filter(a => a.auditType === 'นอกสุ่ม').length})`;
+    }
+
+    function renderList() {
+      const rawQuery = document.getElementById('searchInput').value;
+      const query = rawQuery.trim().toLowerCase();
+      const container = document.getElementById('assetList');
+      const paginationContainer = document.getElementById('paginationContainer');
+      const quickAddBanner = document.getElementById('quickAddFromSearchBanner');
+      document.getElementById('btnClearSearch').classList.toggle('hidden', rawQuery === '');
+
+      const companyAssets = assets.filter(a => a.company === currentCompany);
+      const filtered = companyAssets.filter(item => {
+        const matchQuery = !query ||
+                           (item.code || '').toLowerCase().includes(query) || 
+                           (item.name || '').toLowerCase().includes(query) ||
+                           (item.category || '').toLowerCase().includes(query) ||
+                           (item.location || '').toLowerCase().includes(query);
+        
+        const itemLoc = item.location || '-';
+        const matchLocation = selectedLocations.length === 0 || selectedLocations.includes(itemLoc);
+
+        let matchStatus = true;
+        if (currentFilter === 'ยังไม่ตรวจ') matchStatus = !item.status;
+        else if (currentFilter === 'ดี') matchStatus = item.status === 'ดี';
+        else if (currentFilter === 'ชำรุด') matchStatus = item.status === 'ชำรุด';
+        else if (currentFilter === 'สูญหาย') matchStatus = item.status === 'สูญหาย';
+        else if (currentFilter === 'สุ่ม') matchStatus = (item.auditType || 'สุ่ม') === 'สุ่ม';
+        else if (currentFilter === 'นอกสุ่ม') matchStatus = item.auditType === 'นอกสุ่ม';
+
+        return matchQuery && matchLocation && matchStatus;
+      });
+
+      if (query && filtered.length === 0) {
+        document.getElementById('searchedCodePreview').innerText = rawQuery.trim();
+        quickAddBanner.classList.remove('hidden');
+      } else {
+        quickAddBanner.classList.add('hidden');
+      }
+
+      // แสดง Chips สถานที่ที่กำลังกรอง
+      const chipsContainer = document.getElementById('activeFilterChips');
+      if (selectedLocations.length > 0) {
+        chipsContainer.innerHTML = `<span class="text-[11px] text-slate-500 font-medium">สถานที่:</span>` + selectedLocations.map(loc => `
+          <span class="bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-md flex items-center gap-1 text-[11px]">
+            ${loc} <i class="fa-solid fa-xmark cursor-pointer hover:text-blue-900" onclick="removeLocationChip('${loc}')"></i>
+          </span>
+        `).join('') + `<button onclick="resetLocationFilter()" class="text-[11px] text-red-600 hover:underline ml-1">ล้างตัวกรอง</button>`;
+      } else {
+        chipsContainer.innerHTML = '';
+      }
+
+      if (filtered.length === 0) {
+        container.innerHTML = `<div class="bg-white rounded-xl p-6 text-center text-slate-400 text-xs font-medium">ไม่พบรายการสินทรัพย์</div>`;
+        paginationContainer.innerHTML = '';
+        return;
+      }
+
+      const totalPages = Math.ceil(filtered.length / itemsPerPage);
+      if (currentPage > totalPages) currentPage = totalPages;
+      const startIndex = (currentPage - 1) * itemsPerPage;
+      const paginatedItems = filtered.slice(startIndex, startIndex + itemsPerPage);
+
+      container.innerHTML = paginatedItems.map((item) => {
+        const imgCount = (item.images || []).length;
+        const isExtra = item.auditType === 'นอกสุ่ม';
+        let borderStyle = isExtra ? 'border-l-4 border-l-purple-600' : '';
+        if (item.status === 'ดี') borderStyle = 'border-l-4 border-l-emerald-600';
+        else if (item.status === 'ชำรุด') borderStyle = 'border-l-4 border-l-amber-600';
+        else if (item.status === 'สูญหาย') borderStyle = 'border-l-4 border-l-red-600';
+
+        let badgeStyle = '';
+        if (item.status === 'ดี') badgeStyle = 'bg-emerald-100 text-emerald-800';
+        else if (item.status === 'ชำรุด') badgeStyle = 'bg-amber-100 text-amber-800';
+        else if (item.status === 'สูญหาย') badgeStyle = 'bg-red-100 text-red-800';
+
+        const groupBadge = isExtra
+          ? `<span class="bg-purple-100 text-purple-800 border border-purple-200 text-[10px] font-bold px-2 py-0.5 rounded">➕ เพิ่มใหม่ (นอกสุ่ม)</span>`
+          : `<span class="bg-sky-50 text-sky-700 border border-sky-200 text-[10px] font-bold px-2 py-0.5 rounded">🎯 รายการสุ่ม</span>`;
+
+        return `
+        <div class="bg-white rounded-xl p-3 shadow-sm border ${isExtra ? 'border-purple-200' : 'border-slate-200'} space-y-2.5 transition-all ${borderStyle}">
+          <div class="flex justify-between items-start gap-2">
+            <div>
+              <div class="flex items-center gap-1.5 flex-wrap">
+                ${groupBadge}
+                <span class="bg-slate-100 text-slate-700 text-[10px] font-bold px-2 py-0.5 rounded">${item.category}</span>
+                <span class="text-slate-500 text-[11px]"><i class="fa-solid fa-location-dot text-rose-500 mr-1"></i>${item.location || '-'}</span>
+              </div>
+              <h3 class="font-bold text-slate-800 text-xs mt-1.5 leading-snug">${item.name}</h3>
+              <p class="text-[11px] font-mono font-bold text-blue-600 mt-0.5"><i class="fa-solid fa-barcode mr-1"></i>${item.code}</p>
+            </div>
+            ${item.status ? `<span class="text-[10px] font-bold px-2 py-0.5 rounded ${badgeStyle}">${item.status}</span>` : ''}
+          </div>
+
+          <div class="grid grid-cols-2 gap-2 text-xs">
+            <div>
+              <label class="block text-[10px] text-slate-500 mb-1 font-medium">สถานะการตรวจ:</label>
+              <div class="grid grid-cols-3 gap-1">
+                <button onclick="setStatus('${item.docId}', 'ดี', '${item.status}')" class="status-btn active-${item.status === 'ดี' ? 'ดี' : ''} border border-slate-200 bg-slate-50 py-1 rounded text-[10px] font-medium">ดี</button>
+                <button onclick="setStatus('${item.docId}', 'ชำรุด', '${item.status}')" class="status-btn active-${item.status === 'ชำรุด' ? 'ชำรุด' : ''} border border-slate-200 bg-slate-50 py-1 rounded text-[10px] font-medium">ชำรุด</button>
+                <button onclick="setStatus('${item.docId}', 'สูญหาย', '${item.status}')" class="status-btn active-${item.status === 'สูญหาย' ? 'สูญหาย' : ''} border border-slate-200 bg-slate-50 py-1 rounded text-[10px] font-medium">สูญหาย</button>
+              </div>
+            </div>
+            <div>
+              <label class="block text-[10px] text-slate-500 mb-1 font-medium">สถานะป้าย:</label>
+              <select onchange="setTag('${item.docId}', this.value)" class="w-full bg-slate-50 border border-slate-200 rounded p-1.5 text-[11px] text-slate-700 font-medium focus:outline-none">
+                <option value="มีป้าย" ${item.tag === 'มีป้าย' ? 'selected' : ''}>🏷️ มีป้ายสมบูรณ์</option>
+                <option value="ป้ายชำรุด" ${item.tag === 'ป้ายชำรุด' ? 'selected' : ''}>⚠️ ป้ายชำรุด</option>
+                <option value="ไม่มีป้าย" ${item.tag === 'ไม่มีป้าย' ? 'selected' : ''}>❌ ไม่มีป้าย</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-2 pt-1.5 border-t border-slate-100 flex-wrap">
+            <label class="cursor-pointer bg-slate-800 hover:bg-slate-900 text-white text-[11px] font-medium px-2.5 py-1.5 rounded flex items-center gap-1 transition-all shadow-sm">
+              <i class="fa-solid fa-camera"></i> ถ่ายรูป
+              <input type="file" accept="image/*" capture="environment" multiple onchange="compressAndAttachImage('${item.docId}', event)" class="hidden">
+            </label>
+            ${imgCount > 0 ? `<button onclick="openGallery('${item.docId}')" class="bg-blue-50 hover:bg-blue-100 text-blue-700 text-[11px] font-medium px-2.5 py-1.5 rounded flex items-center gap-1 transition-all"><i class="fa-solid fa-images"></i> รูปภาพ (${imgCount})</button>` : '<span class="text-[10px] text-slate-400">ยังไม่มีรูป</span>'}
+            <input type="text" value="${item.remark || ''}" onchange="setRemark('${item.docId}', this.value)" placeholder="หมายเหตุ..." class="flex-1 min-w-[130px] bg-slate-50 border border-slate-200 rounded px-2 py-1 text-[11px] text-slate-700 focus:outline-none">
+          </div>
+        </div>
+      `}).join('');
+
+      if (totalPages > 1) {
+        let pageHtml = `<button onclick="changePage(${currentPage - 1})" ${currentPage === 1 ? 'disabled class="opacity-40 cursor-not-allowed"' : ''} class="px-3 py-1 bg-white border rounded text-xs font-medium shadow-sm">« ก่อนหน้า</button>`;
+        pageHtml += `<span class="text-xs font-bold text-slate-600 px-2">หน้า ${currentPage} / ${totalPages}</span>`;
+        pageHtml += `<button onclick="changePage(${currentPage + 1})" ${currentPage === totalPages ? 'disabled class="opacity-40 cursor-not-allowed"' : ''} class="px-3 py-1 bg-white border rounded text-xs font-medium shadow-sm">ถัดไป »</button>`;
+        paginationContainer.innerHTML = pageHtml;
+      } else {
+        paginationContainer.innerHTML = '';
+      }
+    }
+
+    function removeLocationChip(loc) {
+      selectedLocations = selectedLocations.filter(l => l !== loc);
+      const checkboxes = document.querySelectorAll('.location-chk');
+      checkboxes.forEach(chk => {
+        if (chk.value === loc) chk.checked = false;
+      });
+      if (selectedLocations.length === 0) {
+        document.getElementById('locationFilterLabel').innerText = 'สถานที่ทั้งหมด';
+      } else {
+        document.getElementById('locationFilterLabel').innerText = `เลือกแล้ว (${selectedLocations.length})`;
+      }
+      currentPage = 1;
+      renderList();
+    }
+
+    function changePage(page) {
+      currentPage = page;
+      renderList();
+      window.scrollTo({ top: 350, behavior: 'smooth' });
+    }
+
+    function clearSearch() {
+      document.getElementById('searchInput').value = '';
+      renderList();
+    }
+
+    function exportToExcelClean() {
+      const meta = companyMetadata[currentCompany] || { inspector: "นายสุรพงษ์ ใจตุ้ย", date: "2026-11-04" };
+      const companyAssets = assets.filter(a => a.company === currentCompany);
+      const excelData = companyAssets.map((a, i) => ({
+        "ลำดับที่": i + 1, "บริษัท/องค์กร": a.company,
+        "ประเภทการตรวจนับ": a.auditType === 'นอกสุ่ม' ? 'เพิ่มใหม่ (นอกสุ่ม)' : 'รายการสุ่ม',
+        "ผู้ตรวจนับ": meta.inspector, "วันที่ตรวจนับ": meta.date,
+        "ประเภทสินทรัพย์": a.category, "เลขทะเบียนทรัพย์สิน": a.code, "ชื่อทรัพย์สิน": a.name,
+        "สถานที่ตั้ง": a.location || '-', "ผู้รับผิดชอบ": a.owner, "สถานะป้าย": a.tag,
+        "สภาพดี/ปกติ": a.status === 'ดี' ? '✓' : '', "สภาพชำรุด": a.status === 'ชำรุด' ? '✓' : '',
+        "สภาพสูญหาย": a.status === 'สูญหาย' ? '✓' : '', "จำนวนรูปถ่าย": (a.images || []).length > 0 ? `${a.images.length} รูป` : 'ไม่มีรูปถ่าย', "หมายเหตุ": a.remark || ''
+      }));
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(excelData);
+      XLSX.utils.book_append_sheet(wb, ws, "รายงานตรวจนับ");
+      XLSX.writeFile(wb, `รายงานตรวจนับ_${currentCompany}_${meta.date}.xlsx`);
+    }
+  </script>
+</body>
+</html>
