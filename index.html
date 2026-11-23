@@ -144,18 +144,34 @@
           </button>
         </div>
 
-        <!-- ปุ่มเปิดกล่องเลือก Location -->
+        <!-- ปุ่มเปิดกล่องเลือก Location (มี Keyword + ติ๊กหลายอัน + Clear) -->
         <div class="relative">
           <button onclick="toggleLocationDropdown()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium px-3 py-2 rounded-lg flex items-center gap-1.5 transition-all border border-slate-200 whitespace-nowrap">
             <i class="fa-solid fa-filter text-blue-600"></i> <span id="locationFilterLabel">สถานที่ทั้งหมด</span> <i class="fa-solid fa-chevron-down text-[10px]"></i>
           </button>
 
-          <div id="locationDropdown" class="hidden absolute right-0 mt-1 w-64 bg-white rounded-xl shadow-xl border border-slate-200 p-3 z-30 space-y-2">
+          <div id="locationDropdown" class="hidden absolute right-0 mt-1 w-72 bg-white rounded-xl shadow-xl border border-slate-200 p-3 z-30 space-y-2">
             <div class="flex justify-between items-center text-xs font-bold border-b pb-1.5 text-slate-700">
-              <span>📍 กรองตามสถานที่ตั้ง</span>
-              <button onclick="resetLocationFilter()" class="text-[10px] text-blue-600 hover:underline">รีเซ็ต</button>
+              <span>📍 กรองสถานที่ (เลือกได้หลายอัน)</span>
+              <button onclick="clearAllFilters()" class="text-[11px] bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-2 py-0.5 rounded font-bold">Clear</button>
             </div>
-            <div id="locationCheckboxesContainer" class="max-h-48 overflow-y-auto space-y-1 text-xs pr-1"></div>
+
+            <!-- ช่องพิมพ์ Keyword ค้นหารายชื่อสถานที่ -->
+            <div class="relative">
+              <i class="fa-solid fa-search absolute left-2.5 top-2 text-slate-400 text-[11px]"></i>
+              <input type="text" id="locationKeywordInput" oninput="renderLocationCheckboxes()" placeholder="พิมพ์ Keyword สถานที่..." class="w-full bg-slate-50 border border-slate-200 rounded-lg pl-7 pr-6 py-1.5 text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-500">
+              <button onclick="clearLocationKeyword()" id="btnClearLocKeyword" class="hidden absolute right-2 top-1.5 text-slate-400 hover:text-slate-600 text-xs">
+                <i class="fa-solid fa-xmark"></i>
+              </button>
+            </div>
+
+            <!-- ปุ่มเลือกทั้งหมด / เลือกเฉพาะที่ตรงกับ Keyword -->
+            <div class="flex justify-between items-center text-[10px] px-0.5">
+              <button onclick="selectMatchingLocations(true)" class="text-blue-600 hover:underline font-medium">เลือกที่ค้นหาทั้งหมด</button>
+              <button onclick="selectMatchingLocations(false)" class="text-slate-500 hover:underline">ยกเลิกที่ค้นหา</button>
+            </div>
+
+            <div id="locationCheckboxesContainer" class="max-h-48 overflow-y-auto space-y-1 text-xs pr-1 border-t border-b py-1.5 border-slate-100"></div>
             <button onclick="toggleLocationDropdown()" class="w-full bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-medium py-1.5 rounded-lg">ตกลง</button>
           </div>
         </div>
@@ -181,7 +197,7 @@
         </button>
       </div>
 
-      <!-- Active Filter Chips -->
+      <!-- Active Filter Chips & Clear Button -->
       <div id="activeFilterChips" class="flex gap-1.5 flex-wrap items-center text-xs"></div>
 
       <!-- Status & Group Tabs -->
@@ -651,20 +667,44 @@
       }).catch(err => alert("บันทึกรายการไม่สำเร็จ: " + err.message));
     }
 
-    // --- ระบบจัดการกล่องกรอง Location แบบ Excel ---
+    // --- ระบบจัดการกล่องกรอง Location แบบ Excel (Keyword + ติ๊กหลายอัน + Clear) ---
     function toggleLocationDropdown() {
       const drop = document.getElementById('locationDropdown');
+      const willOpen = drop.classList.contains('hidden');
       drop.classList.toggle('hidden');
+      if (willOpen) {
+        renderLocationCheckboxes();
+        setTimeout(() => document.getElementById('locationKeywordInput').focus(), 40);
+      }
+    }
+
+    function clearLocationKeyword() {
+      document.getElementById('locationKeywordInput').value = '';
+      renderLocationCheckboxes();
     }
 
     function renderLocationCheckboxes() {
-      const companyAssets = assets.filter(a => a.company === currentCompany);
-      const locations = [...new Set(companyAssets.map(a => a.location || '-'))].sort();
-      const container = document.getElementById('locationCheckboxesContainer');
+      const kwInput = document.getElementById('locationKeywordInput');
+      const rawKw = kwInput ? kwInput.value : '';
+      const kw = String(rawKw || '').trim().toLowerCase();
+      const btnClearKw = document.getElementById('btnClearLocKeyword');
+      if (btnClearKw) btnClearKw.classList.toggle('hidden', rawKw === '');
 
-      container.innerHTML = locations.map(loc => {
+      const companyAssets = assets.filter(a => a.company === currentCompany);
+      const allLocations = [...new Set(companyAssets.map(a => a.location || '-'))].sort();
+      const filteredLocations = kw
+        ? allLocations.filter(loc => String(loc).toLowerCase().includes(kw))
+        : allLocations;
+
+      const container = document.getElementById('locationCheckboxesContainer');
+      if (filteredLocations.length === 0) {
+        container.innerHTML = `<div class="text-center text-slate-400 text-[11px] py-3">ไม่พบสถานที่ที่ตรงกับ Keyword</div>`;
+        return;
+      }
+
+      container.innerHTML = filteredLocations.map(loc => {
         const count = companyAssets.filter(a => (a.location || '-') === loc).length;
-        const isChecked = selectedLocations.length === 0 || selectedLocations.includes(loc);
+        const isChecked = selectedLocations.includes(loc);
         return `
           <label class="flex items-center justify-between hover:bg-slate-50 p-1 rounded cursor-pointer">
             <div class="flex items-center gap-2 truncate">
@@ -679,28 +719,58 @@
 
     function onLocationCheckboxChange() {
       const checkboxes = document.querySelectorAll('.location-chk');
-      const allLocs = [...new Set(assets.filter(a => a.company === currentCompany).map(a => a.location || '-'))];
-      
-      selectedLocations = [];
       checkboxes.forEach(chk => {
-        if (chk.checked) selectedLocations.push(chk.value);
+        if (chk.checked) {
+          if (!selectedLocations.includes(chk.value)) selectedLocations.push(chk.value);
+        } else {
+          selectedLocations = selectedLocations.filter(l => l !== chk.value);
+        }
       });
 
-      if (selectedLocations.length === allLocs.length || selectedLocations.length === 0) {
-        selectedLocations = [];
-        document.getElementById('locationFilterLabel').innerText = 'สถานที่ทั้งหมด';
-      } else {
-        document.getElementById('locationFilterLabel').innerText = `เลือกแล้ว (${selectedLocations.length})`;
-      }
-
+      syncLocationFilterLabel();
       currentPage = 1;
       renderList();
     }
 
-    function resetLocationFilter() {
+    function selectMatchingLocations(shouldSelect) {
+      const checkboxes = document.querySelectorAll('.location-chk');
+      checkboxes.forEach(chk => {
+        chk.checked = shouldSelect;
+        if (shouldSelect) {
+          if (!selectedLocations.includes(chk.value)) selectedLocations.push(chk.value);
+        } else {
+          selectedLocations = selectedLocations.filter(l => l !== chk.value);
+        }
+      });
+      syncLocationFilterLabel();
+      currentPage = 1;
+      renderList();
+    }
+
+    function syncLocationFilterLabel() {
+      const label = document.getElementById('locationFilterLabel');
+      if (selectedLocations.length === 0) {
+        label.innerText = 'สถานที่ทั้งหมด';
+      } else if (selectedLocations.length === 1) {
+        label.innerText = selectedLocations[0];
+      } else {
+        label.innerText = `เลือก ${selectedLocations.length} ที่`;
+      }
+    }
+
+    function clearAllFilters() {
       selectedLocations = [];
-      document.querySelectorAll('.location-chk').forEach(chk => chk.checked = true);
-      document.getElementById('locationFilterLabel').innerText = 'สถานที่ทั้งหมด';
+      currentFilter = 'all';
+      document.getElementById('searchInput').value = '';
+      const kwInput = document.getElementById('locationKeywordInput');
+      if (kwInput) kwInput.value = '';
+
+      document.querySelectorAll('.filter-tab').forEach(btn => btn.className = "filter-tab px-3 py-1 rounded-md font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap");
+      const allTab = document.getElementById('tab-all');
+      if (allTab) allTab.className = "filter-tab px-3 py-1 rounded-md font-medium bg-blue-600 text-white whitespace-nowrap shadow-sm";
+
+      syncLocationFilterLabel();
+      renderLocationCheckboxes();
       currentPage = 1;
       renderList();
     }
@@ -981,7 +1051,6 @@
           if (!cleanCode) return;
           const lowerCode = cleanCode.toLowerCase();
 
-          // กันสแกนรหัสเดิมซ้ำติดกันถี่เกินไป
           const now = Date.now();
           if (cleanCode === lastScannedRawCode && (now - lastScanTimestamp) < 1800) return;
 
@@ -1021,7 +1090,6 @@
               renderList();
             }
           } else {
-            // สแกนได้เลข แต่ไม่อยู่ในรายการสุ่ม -> เด้งปุ่มเพิ่มเป็นรายการนอกสุ่ม
             try {
               const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
               const osc = audioCtx.createOscillator();
@@ -1238,6 +1306,7 @@
       currentCompany = company;
       currentPage = 1;
       selectedLocations = [];
+      syncLocationFilterLabel();
       updateCompanyTabs();
       syncMetaUI();
       renderLocationCheckboxes();
@@ -1436,14 +1505,19 @@
         quickAddBanner.classList.add('hidden');
       }
 
-      // แสดง Chips สถานที่ที่กำลังกรอง
+      // แสดง Chips สถานที่ที่กำลังกรอง + ปุ่ม Clear
       const chipsContainer = document.getElementById('activeFilterChips');
-      if (selectedLocations.length > 0) {
-        chipsContainer.innerHTML = `<span class="text-[11px] text-slate-500 font-medium">สถานที่:</span>` + selectedLocations.map(loc => `
-          <span class="bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-md flex items-center gap-1 text-[11px]">
-            ${loc} <i class="fa-solid fa-xmark cursor-pointer hover:text-blue-900" onclick="removeLocationChip('${loc}')"></i>
-          </span>
-        `).join('') + `<button onclick="resetLocationFilter()" class="text-[11px] text-red-600 hover:underline ml-1">ล้างตัวกรอง</button>`;
+      if (selectedLocations.length > 0 || currentFilter !== 'all' || query) {
+        let chipsHtml = '';
+        if (selectedLocations.length > 0) {
+          chipsHtml += `<span class="text-[11px] text-slate-500 font-medium">สถานที่:</span>` + selectedLocations.map(loc => `
+            <span class="bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-md flex items-center gap-1 text-[11px]">
+              ${loc} <i class="fa-solid fa-xmark cursor-pointer hover:text-blue-900" onclick="removeLocationChip('${loc}')"></i>
+            </span>
+          `).join('');
+        }
+        chipsHtml += `<button onclick="clearAllFilters()" class="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 text-[11px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1"><i class="fa-solid fa-rotate-left"></i> Clear กรอง</button>`;
+        chipsContainer.innerHTML = chipsHtml;
       } else {
         chipsContainer.innerHTML = '';
       }
@@ -1459,8 +1533,9 @@
       const startIndex = (currentPage - 1) * itemsPerPage;
       const paginatedItems = filtered.slice(startIndex, startIndex + itemsPerPage);
 
-      container.innerHTML = paginatedItems.map((item) => {
+      container.innerHTML = paginatedItems.map((item, idx) => {
         const imgCount = (item.images || []).length;
+        const seqNum = item.id || (startIndex + idx + 1);
         const isExtra = item.auditType === 'นอกสุ่ม';
         let borderStyle = isExtra ? 'border-l-4 border-l-purple-600' : '';
         if (item.status === 'ดี') borderStyle = 'border-l-4 border-l-emerald-600';
@@ -1481,6 +1556,7 @@
           <div class="flex justify-between items-start gap-2">
             <div>
               <div class="flex items-center gap-1.5 flex-wrap">
+                <span class="bg-slate-900 text-white text-[10px] font-mono font-bold px-2 py-0.5 rounded">#${seqNum}</span>
                 ${groupBadge}
                 <span class="bg-slate-100 text-slate-700 text-[10px] font-bold px-2 py-0.5 rounded">${item.category}</span>
                 <span class="text-slate-500 text-[11px]"><i class="fa-solid fa-location-dot text-rose-500 mr-1"></i>${item.location || '-'}</span>
@@ -1537,11 +1613,7 @@
       checkboxes.forEach(chk => {
         if (chk.value === loc) chk.checked = false;
       });
-      if (selectedLocations.length === 0) {
-        document.getElementById('locationFilterLabel').innerText = 'สถานที่ทั้งหมด';
-      } else {
-        document.getElementById('locationFilterLabel').innerText = `เลือกแล้ว (${selectedLocations.length})`;
-      }
+      syncLocationFilterLabel();
       currentPage = 1;
       renderList();
     }
@@ -1561,7 +1633,7 @@
       const meta = companyMetadata[currentCompany] || { inspector: "นายสุรพงษ์ ใจตุ้ย", date: "2026-11-04" };
       const companyAssets = assets.filter(a => a.company === currentCompany);
       const excelData = companyAssets.map((a, i) => ({
-        "ลำดับที่": i + 1, "บริษัท/องค์กร": a.company,
+        "ลำดับที่": a.id || (i + 1), "บริษัท/องค์กร": a.company,
         "ประเภทการตรวจนับ": a.auditType === 'นอกสุ่ม' ? 'เพิ่มใหม่ (นอกสุ่ม)' : 'รายการสุ่ม',
         "ผู้ตรวจนับ": meta.inspector, "วันที่ตรวจนับ": meta.date,
         "ประเภทสินทรัพย์": a.category, "เลขทะเบียนทรัพย์สิน": a.code, "ชื่อทรัพย์สิน": a.name,
