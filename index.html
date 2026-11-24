@@ -641,7 +641,10 @@
           if (!imageTrashReady) setImageTrashBadge(s.data().count);
         }
       } catch (e) {
+        // เช่น โควต้า Firestore รายวันหมด: ไม่โชว์ตัวเลข แต่กดเปิดถังขยะได้ตามปกติ
         console.warn('นับจำนวนถังขยะไม่สำเร็จ', e);
+        if (!trashReady) setTrashBadge('–');
+        if (!imageTrashReady) setImageTrashBadge('–');
       }
     }
 
