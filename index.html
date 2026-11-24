@@ -148,8 +148,8 @@
 
         <!-- ปุ่มเปิดกล่องเลือก Location (มี Keyword + ติ๊กหลายอัน + Clear) -->
         <div class="relative">
-          <button onclick="toggleLocationDropdown()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium px-3 py-2 rounded-lg flex items-center gap-1.5 transition-all border border-slate-200 whitespace-nowrap">
-            <i class="fa-solid fa-filter text-blue-600"></i> <span id="locationFilterLabel">สถานที่ทั้งหมด</span> <i class="fa-solid fa-chevron-down text-[10px]"></i>
+          <button id="locationFilterBtn" onclick="toggleLocationDropdown()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium px-3 py-2 rounded-lg flex items-center gap-1.5 transition-all border border-slate-200 whitespace-nowrap">
+            <i id="locationFilterIcon" class="fa-solid fa-filter text-blue-600"></i> <span id="locationFilterLabel">สถานที่ทั้งหมด</span> <i class="fa-solid fa-chevron-down text-[10px]"></i>
           </button>
 
           <div id="locationDropdown" class="hidden absolute right-0 mt-1 w-72 bg-white rounded-xl shadow-xl border border-slate-200 p-3 z-30 space-y-2">
@@ -763,12 +763,30 @@
 
     function syncLocationFilterLabel() {
       const label = document.getElementById('locationFilterLabel');
-      if (selectedLocations.length === 0) {
+      const btn = document.getElementById('locationFilterBtn');
+      const icon = document.getElementById('locationFilterIcon');
+      const active = selectedLocations.length > 0;
+      if (!active) {
         label.innerText = 'สถานที่ทั้งหมด';
       } else if (selectedLocations.length === 1) {
         label.innerText = selectedLocations[0];
       } else {
-        label.innerText = `เลือก ${selectedLocations.length} ที่`;
+        label.innerText = `กรอง ${selectedLocations.length} ที่`;
+      }
+      // ปุ่มเป็นสีน้ำเงินเมื่อกรองอยู่ จะได้ไม่ลืมว่ามีตัวกรองค้าง (ไม่แสดงป้ายสถานที่แล้ว)
+      if (btn) {
+        btn.classList.toggle('bg-blue-600', active);
+        btn.classList.toggle('hover:bg-blue-700', active);
+        btn.classList.toggle('text-white', active);
+        btn.classList.toggle('border-blue-600', active);
+        btn.classList.toggle('bg-slate-100', !active);
+        btn.classList.toggle('hover:bg-slate-200', !active);
+        btn.classList.toggle('text-slate-700', !active);
+        btn.classList.toggle('border-slate-200', !active);
+      }
+      if (icon) {
+        icon.classList.toggle('text-blue-600', !active);
+        icon.classList.toggle('text-white', active);
       }
     }
 
@@ -1677,15 +1695,9 @@
       // แสดง Chips สถานที่ที่กำลังกรอง + ปุ่ม Clear
       const chipsContainer = document.getElementById('activeFilterChips');
       if (selectedLocations.length > 0 || currentFilter !== 'all' || query) {
+        // ไม่แสดงป้ายรายชื่อสถานที่แล้ว (รกเมื่อเลือกหลายที่) จำนวนที่กรองดูได้ที่ปุ่มกรองสถานที่
         let chipsHtml = '';
-        if (selectedLocations.length > 0) {
-          chipsHtml += `<span class="text-[11px] text-slate-500 font-medium">สถานที่:</span>` + selectedLocations.map(loc => `
-            <span class="bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-md flex items-center gap-1 text-[11px]">
-              ${loc} <i class="fa-solid fa-xmark cursor-pointer hover:text-blue-900" onclick="removeLocationChip('${loc}')"></i>
-            </span>
-          `).join('');
-        }
-        chipsHtml += `<button onclick="clearAllFilters()" class="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 text-[11px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1"><i class="fa-solid fa-rotate-left"></i> Clear กรอง</button>`;
+        chipsHtml +=`<button onclick="clearAllFilters()" class="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 text-[11px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1"><i class="fa-solid fa-rotate-left"></i> Clear กรอง</button>`;
         chipsContainer.innerHTML = chipsHtml;
       } else {
         chipsContainer.innerHTML = '';
