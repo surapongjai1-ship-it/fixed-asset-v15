@@ -765,6 +765,57 @@
       return doc.exists ? normalizeAsset(doc) : null;
     }
 
+    // --- รูปถ่ายเก็บแยกคอลเลกชัน: รายการเก็บแค่ imageCount, ตัวรูปโหลดเฉพาะตอนเปิดดู ---
+    // รูปแบบเดิม (images ฝังในรายการ) ยังอ่านได้ จนกว่าจะย้ายครบ
+    const IMAGES_COL = "skyai_asset_images_v1";
+    function imgCountOf(item) {
+      return ((item && item.images) || []).length + ((item && item.imageCount) || 0);
+    }
+
+    // ดึงรูปของหลายรายการ → { docId: [{src, legacyIndex} | {src, imageDocId}] }
+    async function fetchImagesForAssets(items) {
+      const out = {};
+      items.forEach(it => {
+        out[it.docId] = (it.images || []).map((src, i) => ({ src, legacyIndex: i }));
+      });
+      const ids = items.filter(it => (it.imageCount || 0) > 0).map(it => it.docId);
+      for (let i = 0; i < ids.length; i += 30) {
+        const snap = await db.collection(IMAGES_COL).where('assetId', 'in', ids.slice(i, i + 30)).get();
+        const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+          .sort((a, b) => (a.order || 0) - (b.order || 0));
+        docs.forEach(d => { if (out[d.assetId]) out[d.assetId].push({ src: d.data, imageDocId: d.id }); });
+      }
+      return out;
+    }
+
+    // เพิ่มรูปใหม่ลงคอลเลกชันรูป + นับใน imageCount (ทำใน batch เดียว)
+    function addImagesToAsset(asset, dataUrls) {
+      const batch = db.batch();
+      const now = Date.now();
+      dataUrls.forEach((src, i) => {
+        batch.set(db.collection(IMAGES_COL).doc(), {
+          assetId: asset.docId, company: asset.company || '', code: asset.code || '',
+          data: src, order: now + i, createdAt: new Date().toISOString()
+        });
+      });
+      batch.update(db.collection(ASSETS_COL).doc(asset.docId), {
+        imageCount: firebase.firestore.FieldValue.increment(dataUrls.length)
+      });
+      return batch.commit();
+    }
+
+    // ลบรูปของรายการ (ใช้ตอนลบถาวรจากถังขยะ)
+    async function deleteImagesOfAssets(assetIds) {
+      for (let i = 0; i < assetIds.length; i += 30) {
+        const snap = await db.collection(IMAGES_COL).where('assetId', 'in', assetIds.slice(i, i + 30)).get();
+        for (let j = 0; j < snap.docs.length; j += 400) {
+          const batch = db.batch();
+          snap.docs.slice(j, j + 400).forEach(d => batch.delete(d.ref));
+          await batch.commit();
+        }
+      }
+    }
+
     function updateCompanyMeta(field, value) {
       if (!companyMetadata[currentCompany]) {
         companyMetadata[currentCompany] = { inspector: "", date: "" };
@@ -904,6 +955,8 @@
       const nextId = maxId + 1;
       const docId = `extra_${currentCompany}_${nextId}_${Date.now()}`;
 
+      const extraImages = pendingExtraImages.slice();
+      const extraAsset = { docId, company: currentCompany, code: codeOnly };
       db.collection("skyai_assets_v9_clean").doc(docId).set({
         id: nextId,
         company: currentCompany,
@@ -914,11 +967,11 @@
         owner: (companyMetadata[currentCompany] && companyMetadata[currentCompany].inspector) || 'AC',
         tag: tagVal,
         status: statusVal,
-        images: pendingExtraImages,
+        imageCount: 0,
         remark: remarkVal,
         auditType: 'นอกสุ่ม',
         createdAt: new Date().toISOString()
-      }).then(() => {
+      }).then(() => extraImages.length ? addImagesToAsset(extraAsset, extraImages) : null).then(() => {
         closeAddExtraModal();
       }).catch(err => alert("บันทึกรายการไม่สำเร็จ: " + err.message));
     }
@@ -1092,26 +1145,36 @@
       }
     }
 
-    function removeSingleImage(docId, imgIndex) {
+    async function removeSingleImage(docId, imgIndex) {
       if (!confirm("ต้องการย้ายรูปถ่ายนี้ไปยังถังขยะรูปถ่ายใช่หรือไม่?")) return;
       const target = assets.find(a => a.docId === docId);
-      if (target && target.images && target.images[imgIndex]) {
-        const deletedImgUrl = target.images[imgIndex];
-        const updatedImgs = target.images.filter((_, idx) => idx !== imgIndex);
+      const entry = galleryState.docId === docId ? galleryState.list[imgIndex] : null;
+      if (!target || !entry) return;
 
-        db.collection("skyai_image_trash_v9").add({
-          assetDocId: docId,
-          assetCode: target.code,
-          assetName: target.name,
-          company: target.company,
-          imageDataUrl: deletedImgUrl,
-          deletedAt: new Date().toISOString()
-        }).then(refreshTrashCounts);
-
-        updateAssetField(docId, 'images', updatedImgs);
-        if (updatedImgs.length === 0) closeGallery();
-        else openGallery(docId);
+      const batch = db.batch();
+      batch.set(db.collection("skyai_image_trash_v9").doc(), {
+        assetDocId: docId,
+        assetCode: target.code,
+        assetName: target.name,
+        company: target.company,
+        imageDataUrl: entry.src,
+        deletedAt: new Date().toISOString()
+      });
+      const assetRef = db.collection(ASSETS_COL).doc(docId);
+      if (entry.imageDocId) {
+        batch.delete(db.collection(IMAGES_COL).doc(entry.imageDocId));
+        batch.update(assetRef, { imageCount: firebase.firestore.FieldValue.increment(-1) });
+      } else {
+        batch.update(assetRef, { images: (target.images || []).filter((_, idx) => idx !== entry.legacyIndex) });
       }
+      try {
+        await batch.commit();
+        refreshTrashCounts();
+      } catch (err) {
+        return alert("ลบรูปไม่สำเร็จ: " + err.message);
+      }
+      if (galleryState.list.length <= 1) closeGallery();
+      else openGallery(docId);
     }
 
     function openImageTrashModal() {
@@ -1155,10 +1218,7 @@
         return;
       }
 
-      const updatedImgs = [...(targetAsset.images || []), item.imageDataUrl];
-      db.collection("skyai_assets_v9_clean").doc(item.assetDocId).update({
-        images: updatedImgs
-      }).then(() => {
+      addImagesToAsset(targetAsset, [item.imageDataUrl]).then(() => {
         db.collection("skyai_image_trash_v9").doc(trashImgId).delete();
         alert(`กู้คืนรูปถ่ายกลับไปยังรายการ ${item.assetCode} สำเร็จ!`);
       }).catch(err => alert("เกิดข้อผิดพลาด: " + err.message));
@@ -1180,7 +1240,7 @@
     function deleteSingleAsset(docId) {
       const item = assets.find(a => a.docId === docId);
       if (!item) return;
-      const imgCount = (item.images || []).length;
+      const imgCount = imgCountOf(item);
       const msg = `ต้องการลบรายการนี้ใช่หรือไม่?\n\n${item.code}\n${item.name || ''}` +
         (imgCount > 0 ? `\n(มีรูปถ่าย ${imgCount} รูป จะย้ายไปด้วย)` : '') +
         `\n\nรายการจะถูกย้ายไปถังขยะ กู้คืนได้ภายหลัง`;
@@ -1246,7 +1306,7 @@
                   <div class="min-w-0">
                     <div class="text-[11px] font-mono font-bold text-blue-600 truncate">${item.code}</div>
                     <div class="text-[10px] text-slate-600 truncate">${item.name || ''}</div>
-                    <div class="text-[10px] text-slate-400 truncate">🏢 ${item.company}${(item.images || []).length ? ` · 📸 ${item.images.length} รูป` : ''}</div>
+                    <div class="text-[10px] text-slate-400 truncate">🏢 ${item.company}${imgCountOf(item) ? ` · 📸 ${imgCountOf(item)} รูป` : ''}</div>
                   </div>
                   <div class="shrink-0 flex gap-1">
                     <button onclick="restoreSingleAsset('${item.trashId}')" class="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] px-2.5 py-1 rounded shadow-sm">
@@ -1262,7 +1322,7 @@
           `;
         }
         for (let comp in grouped) {
-          const totalImgs = grouped[comp].reduce((sum, i) => sum + (i.images ? i.images.length : 0), 0);
+          const totalImgs = grouped[comp].reduce((sum, i) => sum + imgCountOf(i), 0);
           html += `
             <div class="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2">
               <div class="flex justify-between items-center text-xs font-bold text-slate-700">
@@ -1332,11 +1392,12 @@
     async function permanentlyDeleteTrashItem(trashId) {
       const item = trashAssets.find(t => t.trashId === trashId);
       if (!item) return;
-      const imgCount = (item.images || []).length;
+      const imgCount = imgCountOf(item);
       if (!confirm(`⚠️ ลบถาวร: ${item.code}\n${item.name || ''}` +
         (imgCount > 0 ? `\nรวมรูปถ่าย ${imgCount} รูป` : '') +
         `\n\nลบแล้วกู้คืนไม่ได้อีก ต้องการลบใช่หรือไม่?`)) return;
       try {
+        if ((item.imageCount || 0) > 0 && item.originalDocId) await deleteImagesOfAssets([item.originalDocId]);
         await deleteTrashDocs([trashId]);
         trashAssets = trashAssets.filter(t => t.trashId !== trashId);
         openTrashModal();
@@ -1348,10 +1409,11 @@
     async function permanentlyDeleteTrashCompany(compName) {
       const items = trashAssets.filter(t => t.company === compName && t.trashType !== 'item');
       if (items.length === 0) return;
-      const imgCount = items.reduce((s, i) => s + (i.images ? i.images.length : 0), 0);
+      const imgCount = items.reduce((s, i) => s + imgCountOf(i), 0);
       if (!confirm(`⚠️ ลบถาวร: Tab บริษัท "${compName}"\n${items.length} รายการ, รูปถ่าย ${imgCount} รูป\n\nลบแล้วกู้คืนไม่ได้อีก ต้องการลบใช่หรือไม่?`)) return;
       try {
         const ids = items.map(i => i.trashId);
+        await deleteImagesOfAssets(items.filter(i => (i.imageCount || 0) > 0 && i.originalDocId).map(i => i.originalDocId));
         await deleteTrashDocs(ids);
         trashAssets = trashAssets.filter(t => !ids.includes(t.trashId));
         openTrashModal();
@@ -1364,6 +1426,7 @@
     async function emptyTrash() {
       if (!confirm("⚠️ คำเตือน: คุณต้องการล้างถังขยะทั้งหมดถาวรใช่หรือไม่?")) return;
       try {
+        await deleteImagesOfAssets(trashAssets.filter(i => (i.imageCount || 0) > 0 && i.originalDocId).map(i => i.originalDocId));
         await deleteTrashDocs(trashAssets.map(item => item.trashId));
         alert("ล้างถังขยะเรียบร้อยแล้ว");
         closeTrashModal();
@@ -1658,8 +1721,6 @@
       const target = await getAssetById(targetDocId).catch(() => null);
       if (!target) return;
 
-      let currentImgs = [...(target.images || [])];
-
       const reader = new FileReader();
       reader.onload = function(e) {
         const img = new Image();
@@ -1672,12 +1733,9 @@
           canvas.width = width; canvas.height = height;
           canvas.getContext('2d').drawImage(img, 0, 0, width, height);
 
-          currentImgs.push(canvas.toDataURL('image/jpeg', 0.65));
-          db.collection("skyai_assets_v9_clean").doc(targetDocId).update({
-            images: currentImgs
-          }).then(() => {
+          addImagesToAsset(target, [canvas.toDataURL('image/jpeg', 0.65)]).then(() => {
             alert("บันทึกรูปถ่ายด่วนสำเร็จ!");
-          });
+          }).catch(err => alert("บันทึกรูปไม่สำเร็จ: " + err.message));
         };
         img.src = e.target.result;
       };
@@ -1752,7 +1810,7 @@
               owner: col5,
               tag: 'มีป้าย',
               status: '',
-              images: [],
+              imageCount: 0,
               remark: '',
               auditType: 'สุ่ม'
             });
@@ -1826,7 +1884,7 @@
       const target = assets.find(a => a.docId === docId);
       if (!target) return;
 
-      let currentImgs = [...(target.images || [])];
+      const newImgs = [];
       let processedCount = 0;
 
       Array.from(files).forEach(file => {
@@ -1842,10 +1900,10 @@
             canvas.width = width; canvas.height = height;
             canvas.getContext('2d').drawImage(img, 0, 0, width, height);
 
-            currentImgs.push(canvas.toDataURL('image/jpeg', 0.65));
+            newImgs.push(canvas.toDataURL('image/jpeg', 0.65));
             processedCount++;
             if (processedCount === files.length) {
-              db.collection("skyai_assets_v9_clean").doc(docId).update({ images: currentImgs });
+              addImagesToAsset(target, newImgs).catch(err => alert("บันทึกรูปไม่สำเร็จ: " + err.message));
             }
           };
           img.src = e.target.result;
@@ -1854,14 +1912,31 @@
       });
     }
 
-    function openGallery(docId) {
+    let galleryState = { docId: null, list: [] };
+    async function openGallery(docId) {
       const item = assets.find(a => a.docId === docId);
-      if (!item || !item.images || item.images.length === 0) return;
-      document.getElementById('galleryTitle').innerText = `อัลบั้มรูปถ่าย: ${item.code} (${item.images.length} รูป)`;
+      if (!item || imgCountOf(item) === 0) return;
       const thumbContainer = document.getElementById('thumbnailContainer');
+      const isOpen = !document.getElementById('galleryModal').classList.contains('hidden');
+      if (!isOpen) {
+        document.getElementById('galleryTitle').innerText = `อัลบั้มรูปถ่าย: ${item.code} (กำลังโหลดรูป...)`;
+        document.getElementById('activeGalleryImg').removeAttribute('src');
+        thumbContainer.innerHTML = '';
+        document.getElementById('galleryModal').classList.remove('hidden');
+      }
+      let list;
+      try {
+        list = (await fetchImagesForAssets([item]))[docId] || [];
+      } catch (err) {
+        document.getElementById('galleryTitle').innerText = `โหลดรูปไม่สำเร็จ: ${err.message}`;
+        return;
+      }
+      galleryState = { docId, list };
+      if (list.length === 0) return closeGallery();
+      document.getElementById('galleryTitle').innerText = `อัลบั้มรูปถ่าย: ${item.code} (${list.length} รูป)`;
       thumbContainer.innerHTML = '';
 
-      item.images.forEach((imgSrc, idx) => {
+      list.map(e => e.src).forEach((imgSrc, idx) => {
         const thumb = document.createElement('div');
         thumb.className = `relative cursor-pointer flex-shrink-0 w-14 h-14 rounded-lg overflow-hidden border-2 ${idx === 0 ? 'border-blue-600 scale-105' : 'border-transparent opacity-70'} transition-all`;
         thumb.onclick = () => selectGalleryImg(imgSrc, item.code, idx, thumbContainer);
@@ -1871,8 +1946,7 @@
         `;
         thumbContainer.appendChild(thumb);
       });
-      selectGalleryImg(item.images[0], item.code, 0, thumbContainer);
-      document.getElementById('galleryModal').classList.remove('hidden');
+      selectGalleryImg(list[0].src, item.code, 0, thumbContainer);
     }
 
     function selectGalleryImg(imgSrc, code, index, container) {
@@ -1891,13 +1965,16 @@
     async function downloadAllImagesZip() {
       const zip = new JSZip();
       let totalImages = 0;
-      assets.filter(a => a.company === currentCompany).forEach(item => {
-        if (item.images) {
-          item.images.forEach((img, idx) => {
-            totalImages++;
-            zip.file(`${item.code}_${idx + 1}.jpg`, img.replace(/^data:image\/jpeg;base64,/, ""), { base64: true });
-          });
-        }
+      const withImgs = assets.filter(a => a.company === currentCompany && imgCountOf(a) > 0);
+      if (withImgs.length === 0) return alert("ยังไม่มีรูปถ่ายในระบบของบริษัทนี้ครับ");
+      let byAsset;
+      try { byAsset = await fetchImagesForAssets(withImgs); }
+      catch (err) { return alert("โหลดรูปไม่สำเร็จ: " + err.message); }
+      withImgs.forEach(item => {
+        (byAsset[item.docId] || []).forEach((e, idx) => {
+          totalImages++;
+          zip.file(`${item.code}_${idx + 1}.jpg`, e.src.replace(/^data:image\/jpeg;base64,/, ""), { base64: true });
+        });
       });
       if (totalImages === 0) return alert("ยังไม่มีรูปถ่ายในระบบของบริษัทนี้ครับ");
       alert(`กำลังเตรียมไฟล์ ZIP (${totalImages} รูป)...`);
@@ -2027,7 +2104,7 @@
       const paginatedItems = filtered.slice(startIndex, startIndex + itemsPerPage);
 
       container.innerHTML = paginatedItems.map((item, idx) => {
-        const imgCount = (item.images || []).length;
+        const imgCount = imgCountOf(item);
         const seqNum = item.id || (startIndex + idx + 1);
         const isExtra = item.auditType === 'นอกสุ่ม';
         let borderStyle = isExtra ? 'border-l-4 border-l-purple-600' : '';
@@ -2144,7 +2221,7 @@
         "ประเภทสินทรัพย์": a.category, "เลขทะเบียนทรัพย์สิน": a.code, "ชื่อทรัพย์สิน": a.name,
         "สถานที่ตั้ง": a.location || '-', "ผู้รับผิดชอบ": a.owner, "สถานะป้าย": a.tag,
         "สภาพดี/ปกติ": a.status === 'ดี' ? '✓' : '', "สภาพชำรุด": a.status === 'ชำรุด' ? '✓' : '',
-        "สภาพสูญหาย": a.status === 'สูญหาย' ? '✓' : '', "จำนวนรูปถ่าย": (a.images || []).length > 0 ? `${a.images.length} รูป` : 'ไม่มีรูปถ่าย', "หมายเหตุ": a.remark || ''
+        "สภาพสูญหาย": a.status === 'สูญหาย' ? '✓' : '', "จำนวนรูปถ่าย": imgCountOf(a) > 0 ? `${imgCountOf(a)} รูป` : 'ไม่มีรูปถ่าย', "หมายเหตุ": a.remark || ''
       }));
       const wb = XLSX.utils.book_new();
       const ws = XLSX.utils.json_to_sheet(excelData);
