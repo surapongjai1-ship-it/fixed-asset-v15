@@ -39,42 +39,28 @@
 
   <!-- Minimal Clean Header -->
   <header id="appHeader" class="bg-slate-900 text-white shadow-md sticky top-0 z-30 px-4 py-3">
-    <div class="max-w-4xl mx-auto flex items-center justify-between">
-      <div class="flex items-center space-x-2.5">
+    <div class="max-w-4xl mx-auto relative">
+    <div class="flex items-center justify-between gap-2">
+      <div class="flex items-center space-x-2.5 min-w-0">
         <div class="bg-blue-600 text-white p-2 rounded-lg flex items-center justify-center">
           <i class="fa-solid fa-clipboard-check text-sm"></i>
         </div>
         <h1 class="text-sm font-bold tracking-wide">ระบบตรวจนับสินทรัพย์ถาวร</h1>
       </div>
-      <!-- มือถือ: รวมเครื่องมือไว้ในเมนู ☰ -->
-      <button onclick="toggleMobileMenu()" aria-label="เมนู" class="sm:hidden bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white w-11 h-11 rounded-lg flex items-center justify-center">
-        <i id="mobileMenuIcon" class="fa-solid fa-bars text-lg"></i>
-      </button>
-      <div class="hidden sm:flex gap-1.5 flex-wrap items-center">
-        <button onclick="openTrashModal()" title="ถังขยะ Tab บริษัท" class="bg-slate-800 hover:bg-slate-700 text-amber-400 border border-slate-700 text-xs font-medium px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-all shadow-sm">
-          <i class="fa-solid fa-folder-minus"></i> <span class="hidden sm:inline">ถังขยะ Tab</span> (<span id="trashCountBadge">0</span>)
+      <div class="flex items-center gap-2 shrink-0">
+        <!-- จอใหญ่: เหลือปุ่ม Excel ไว้ข้างนอก ที่เหลืออยู่ในเมนู -->
+        <button onclick="exportToExcelClean()" title="ส่งออก Excel" class="hidden sm:flex bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium px-3 py-2 rounded-lg items-center gap-1.5 transition-all shadow-sm">
+          <i class="fa-solid fa-file-excel"></i> Excel
         </button>
-        <button onclick="openImageTrashModal()" title="ถังขยะรูปถ่าย" class="bg-slate-800 hover:bg-slate-700 text-purple-400 border border-slate-700 text-xs font-medium px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-all shadow-sm">
-          <i class="fa-solid fa-image"></i> <span class="hidden sm:inline">ถังขยะรูป</span> (<span id="imgTrashCountBadge">0</span>)
-        </button>
-        <button onclick="downloadExcelTemplate()" title="โหลดไฟล์ฟอร์มสำหรับนำเข้า" class="bg-sky-600 hover:bg-sky-700 text-white text-xs font-medium px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-all shadow-sm">
-          <i class="fa-solid fa-file-arrow-down"></i> <span class="hidden sm:inline">โหลดฟอร์ม</span>
-        </button>
-        <label class="cursor-pointer bg-amber-600 hover:bg-amber-700 text-white text-xs font-medium px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-all shadow-sm">
-          <i class="fa-solid fa-file-import"></i> <span class="hidden sm:inline">นำเข้าไฟล์</span>
-          <input type="file" accept=".xlsx, .xls, .csv" onchange="importExcelFile(event)" class="hidden">
-        </label>
-        <button onclick="downloadAllImagesZip()" title="โหลดรูปทั้งหมด (.zip)" class="bg-violet-600 hover:bg-violet-700 text-white text-xs font-medium px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-all shadow-sm">
-          <i class="fa-solid fa-file-zipper"></i> <span class="hidden sm:inline">โหลดรูป</span>
-        </button>
-        <button onclick="exportToExcelClean()" title="ส่งออก Excel" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-all shadow-sm">
-          <i class="fa-solid fa-file-excel"></i> <span class="hidden sm:inline">Excel</span>
+        <!-- เมนู ☰ (ทุกขนาดจอ) -->
+        <button id="menuToggleBtn" onclick="toggleMobileMenu()" aria-label="เมนู" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white h-11 sm:h-9 px-3 rounded-lg flex items-center justify-center gap-2 text-xs font-medium">
+          <i id="mobileMenuIcon" class="fa-solid fa-bars text-lg sm:text-sm"></i><span class="hidden sm:inline">เมนู</span>
         </button>
       </div>
     </div>
 
-    <!-- เมนูมือถือ (เปิดจากปุ่ม ☰) -->
-    <nav id="mobileMenu" class="hidden sm:hidden max-w-4xl mx-auto mt-3 border-t border-slate-700 pt-2 text-sm">
+    <!-- เมนู: มือถือ = แผ่นเต็มความกว้างใต้แถบหัว, จอใหญ่ = กล่องดรอปดาวน์ทางขวา -->
+    <nav id="mobileMenu" class="hidden mt-3 border-t border-slate-700 pt-2 text-sm sm:absolute sm:right-0 sm:top-full sm:mt-2 sm:w-72 sm:bg-slate-900 sm:border sm:rounded-xl sm:shadow-2xl sm:p-2 sm:z-40">
       <button onclick="closeMobileMenu(); toggleMetaCard(true)" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
         <i class="fa-solid fa-user-pen w-5 text-center text-slate-300"></i> ผู้ตรวจ และวันที่ตรวจ
       </button>
@@ -104,6 +90,7 @@
         <i class="fa-solid fa-triangle-exclamation w-5 text-center"></i> ลบบริษัทนี้ (ย้ายไปถังขยะ)
       </button>
     </nav>
+    </div>
   </header>
 
   <main class="max-w-4xl mx-auto px-4 pt-4 space-y-3.5">
@@ -536,6 +523,14 @@
       document.getElementById('mobileMenu').classList.add('hidden');
       document.getElementById('mobileMenuIcon').className = 'fa-solid fa-bars text-lg';
     }
+    // ปิดเมนูเมื่อแตะที่อื่น
+    document.addEventListener('click', (e) => {
+      const menu = document.getElementById('mobileMenu');
+      const btn = document.getElementById('menuToggleBtn');
+      if (!menu || menu.classList.contains('hidden')) return;
+      if (menu.contains(e.target) || (btn && btn.contains(e.target))) return;
+      closeMobileMenu();
+    });
     function toggleMetaCard(show) {
       const card = document.getElementById('metaCard');
       card.classList.toggle('hidden', !show);
@@ -610,7 +605,6 @@
         snapshot.forEach((doc) => {
           trashAssets.push({ trashId: doc.id, ...doc.data() });
         });
-        document.getElementById('trashCountBadge').innerText = trashAssets.length;
         document.getElementById('trashCountBadgeMobile').innerText = trashAssets.length;
       });
 
@@ -619,7 +613,6 @@
         snapshot.forEach((doc) => {
           imageTrash.push({ trashImgId: doc.id, ...doc.data() });
         });
-        document.getElementById('imgTrashCountBadge').innerText = imageTrash.length;
         document.getElementById('imgTrashCountBadgeMobile').innerText = imageTrash.length;
       });
     };
