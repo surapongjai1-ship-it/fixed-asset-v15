@@ -255,6 +255,7 @@
         <button onclick="filterStatus('สูญหาย')" id="tab-สูญหาย" class="filter-tab px-3 py-1.5 sm:py-1 rounded-md font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap">สูญหาย</button>
         <button onclick="filterStatus('สุ่ม')" id="tab-สุ่ม" class="filter-tab px-3 py-1.5 sm:py-1 rounded-md font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap">🎯 รายการสุ่ม</button>
         <button onclick="filterStatus('นอกสุ่ม')" id="tab-นอกสุ่ม" class="filter-tab px-3 py-1.5 sm:py-1 rounded-md font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap">➕ เพิ่มใหม่</button>
+        <button onclick="filterStatus('มีรูป')" id="tab-มีรูป" class="filter-tab px-3 py-1.5 sm:py-1 rounded-md font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap">📸 มีรูป</button>
       </div>
     </div>
 
@@ -2040,6 +2041,7 @@
       document.getElementById('tab-สูญหาย').innerText = `สูญหาย (${companyAssets.filter(a => a.status === 'สูญหาย').length})`;
       document.getElementById('tab-สุ่ม').innerText = `🎯 รายการสุ่ม (${companyAssets.filter(a => (a.auditType || 'สุ่ม') === 'สุ่ม').length})`;
       document.getElementById('tab-นอกสุ่ม').innerText = `➕ เพิ่มใหม่ (${companyAssets.filter(a => a.auditType === 'นอกสุ่ม').length})`;
+      document.getElementById('tab-มีรูป').innerText = `📸 มีรูป (${companyAssets.filter(a => imgCountOf(a) > 0).length})`;
     }
 
     function renderList() {
@@ -2068,6 +2070,7 @@
         else if (currentFilter === 'สูญหาย') matchStatus = item.status === 'สูญหาย';
         else if (currentFilter === 'สุ่ม') matchStatus = (item.auditType || 'สุ่ม') === 'สุ่ม';
         else if (currentFilter === 'นอกสุ่ม') matchStatus = item.auditType === 'นอกสุ่ม';
+        else if (currentFilter === 'มีรูป') matchStatus = imgCountOf(item) > 0;
 
         return matchQuery && matchLocation && matchStatus;
       });
