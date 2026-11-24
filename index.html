@@ -43,7 +43,11 @@
         </div>
         <h1 class="text-sm font-bold tracking-wide">ระบบตรวจนับสินทรัพย์ถาวร</h1>
       </div>
-      <div class="flex gap-1.5 flex-wrap items-center">
+      <!-- มือถือ: รวมเครื่องมือไว้ในเมนู ☰ -->
+      <button onclick="toggleMobileMenu()" aria-label="เมนู" class="sm:hidden bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white w-11 h-11 rounded-lg flex items-center justify-center">
+        <i id="mobileMenuIcon" class="fa-solid fa-bars text-lg"></i>
+      </button>
+      <div class="hidden sm:flex gap-1.5 flex-wrap items-center">
         <button onclick="openTrashModal()" title="ถังขยะ Tab บริษัท" class="bg-slate-800 hover:bg-slate-700 text-amber-400 border border-slate-700 text-xs font-medium px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-all shadow-sm">
           <i class="fa-solid fa-folder-minus"></i> <span class="hidden sm:inline">ถังขยะ Tab</span> (<span id="trashCountBadge">0</span>)
         </button>
@@ -65,6 +69,38 @@
         </button>
       </div>
     </div>
+
+    <!-- เมนูมือถือ (เปิดจากปุ่ม ☰) -->
+    <nav id="mobileMenu" class="hidden sm:hidden max-w-4xl mx-auto mt-3 border-t border-slate-700 pt-2 text-sm">
+      <button onclick="closeMobileMenu(); toggleMetaCard(true)" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
+        <i class="fa-solid fa-user-pen w-5 text-center text-slate-300"></i> ผู้ตรวจ และวันที่ตรวจ
+      </button>
+      <button onclick="closeMobileMenu(); exportToExcelClean()" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
+        <i class="fa-solid fa-file-excel w-5 text-center text-emerald-400"></i> ส่งออก Excel
+      </button>
+      <button onclick="closeMobileMenu(); downloadAllImagesZip()" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
+        <i class="fa-solid fa-file-zipper w-5 text-center text-violet-400"></i> โหลดรูปทั้งหมด (.zip)
+      </button>
+      <label class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 cursor-pointer">
+        <i class="fa-solid fa-file-import w-5 text-center text-amber-400"></i> นำเข้าไฟล์ Excel
+        <input type="file" accept=".xlsx, .xls, .csv" onchange="closeMobileMenu(); importExcelFile(event)" class="hidden">
+      </label>
+      <button onclick="closeMobileMenu(); downloadExcelTemplate()" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
+        <i class="fa-solid fa-file-arrow-down w-5 text-center text-sky-400"></i> โหลดฟอร์มสำหรับนำเข้า
+      </button>
+      <button onclick="closeMobileMenu(); openTrashModal()" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
+        <i class="fa-solid fa-folder-minus w-5 text-center text-amber-400"></i> ถังขยะ (<span id="trashCountBadgeMobile">0</span>)
+      </button>
+      <button onclick="closeMobileMenu(); openImageTrashModal()" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
+        <i class="fa-solid fa-image w-5 text-center text-purple-400"></i> ถังขยะรูป (<span id="imgTrashCountBadgeMobile">0</span>)
+      </button>
+      <button onclick="closeMobileMenu(); renameCurrentCompany()" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
+        <i class="fa-solid fa-pen-to-square w-5 text-center text-slate-300"></i> เปลี่ยนชื่อ Tab บริษัทนี้
+      </button>
+      <button onclick="closeMobileMenu(); confirmDeleteCurrentCompany()" class="w-full flex items-center gap-3 px-2 py-3 mt-1 rounded-lg hover:bg-slate-800 text-left text-red-400 border-t border-slate-700">
+        <i class="fa-solid fa-triangle-exclamation w-5 text-center"></i> ลบบริษัทนี้ (ย้ายไปถังขยะ)
+      </button>
+    </nav>
   </header>
 
   <main class="max-w-4xl mx-auto px-4 pt-4 space-y-3.5">
@@ -72,7 +108,7 @@
     <!-- Company Tabs, Rename & Delete Tab Buttons -->
     <div class="bg-white rounded-xl p-2 shadow-sm border border-slate-200 flex items-center justify-between gap-2 overflow-x-auto">
       <div id="companyTabsContainer" class="flex gap-1.5 overflow-x-auto"></div>
-      <div class="flex gap-1.5 flex-shrink-0">
+      <div class="hidden sm:flex gap-1.5 flex-shrink-0">
         <button onclick="renameCurrentCompany()" title="เปลี่ยนชื่อ Tab บริษัท" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1">
           <i class="fa-solid fa-pen-to-square"></i> เปลี่ยนชื่อ Tab
         </button>
@@ -82,9 +118,13 @@
       </div>
     </div>
 
-    <!-- Metadata Form -->
-    <div class="bg-white rounded-xl p-3 shadow-sm border border-slate-200">
-      <div class="grid grid-cols-2 gap-3 text-xs">
+    <!-- Metadata Form (มือถือ: ซ่อนไว้ เปิดจากเมนู ☰) -->
+    <div id="metaCard" class="hidden sm:block bg-white rounded-xl p-3 shadow-sm border border-slate-200">
+      <div class="flex sm:hidden justify-between items-center mb-2 text-xs font-bold text-slate-700">
+        <span><i class="fa-solid fa-user-pen mr-1 text-blue-600"></i> ผู้ตรวจ และวันที่ตรวจ</span>
+        <button onclick="toggleMetaCard(false)" class="text-slate-500 px-2 py-1" aria-label="ปิด">ปิด <i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm sm:text-xs">
         <div>
           <label class="block text-slate-500 font-medium mb-1">ผู้ตรวจนับ / จัดทำ (<span id="metaCompLabel1">SKYAI</span>)</label>
           <input type="text" id="inspectorName" onchange="updateCompanyMeta('inspector', this.value)" placeholder="ระบุชื่อผู้ตรวจนับ..." class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-800 font-medium focus:outline-none focus:ring-1 focus:ring-blue-500">
@@ -103,6 +143,18 @@
         <span id="progressBadge" class="font-bold bg-blue-50 text-blue-700 px-2.5 py-0.5 rounded-full">0 / 0 (0%)</span>
       </div>
 
+      <!-- แถบความคืบหน้า + สรุปบรรทัดเดียว (มือถือ) -->
+      <div class="h-2 bg-slate-100 rounded-full overflow-hidden">
+        <div id="progressBar" class="h-full bg-emerald-600 transition-all" style="width:0%"></div>
+      </div>
+      <div class="flex sm:hidden items-center gap-3 text-xs text-slate-600">
+        <span>ดี <b id="mGood" class="text-emerald-700">0</b></span>
+        <span>ชำรุด <b id="mDamage" class="text-amber-700">0</b></span>
+        <span>สูญหาย <b id="mLost" class="text-red-700">0</b></span>
+        <button onclick="toggleDashDetails()" id="dashToggleBtn" class="ml-auto text-blue-600 font-medium py-1">ดูกราฟ <i class="fa-solid fa-chevron-down text-[10px]"></i></button>
+      </div>
+
+      <div id="dashDetails" class="hidden sm:block space-y-3">
       <div class="grid grid-cols-4 gap-1.5 text-center text-xs">
         <div class="bg-slate-50 p-2 rounded-lg border border-slate-100">
           <div id="cntTotal" class="text-sm font-bold text-slate-800">0</div>
@@ -132,6 +184,7 @@
           <canvas id="dashboardChart"></canvas>
         </div>
       </div>
+      </div>
     </div>
 
     <!-- Search, Location Filter, Add Extra & Scanner Bar -->
@@ -139,16 +192,17 @@
       <div class="flex gap-2 items-center flex-wrap sm:flex-nowrap">
         <!-- ช่องค้นหาเลขทะเบียน / ชื่อ -->
         <div class="relative flex-1 min-w-[180px]">
-          <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-slate-400 text-xs"></i>
-          <input type="text" id="searchInput" autofocus oninput="currentPage=1; renderList()" placeholder="พิมพ์เลขทะเบียน หรือยิงบาร์โค้ด..." class="w-full bg-slate-50 border border-slate-200 rounded-lg pl-8 pr-8 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono">
-          <button onclick="clearSearch()" id="btnClearSearch" class="hidden absolute right-3 top-2.5 text-slate-400 hover:text-slate-600">
-            <i class="fa-solid fa-xmark text-xs"></i>
+          <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+          <!-- มือถือใช้ตัวอักษร 16px ไม่งั้น iPhone จะซูมหน้าเองเวลาแตะช่องค้นหา -->
+          <input type="text" id="searchInput" autofocus oninput="currentPage=1; renderList()" placeholder="ค้นหาเลขทะเบียน ชื่อ สถานที่..." class="w-full bg-slate-50 border border-slate-200 rounded-lg pl-8 pr-9 py-2.5 sm:py-2 text-base sm:text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono">
+          <button onclick="clearSearch()" id="btnClearSearch" aria-label="ล้างคำค้นหา" class="hidden absolute right-1 top-1/2 -translate-y-1/2 w-8 h-8 text-slate-400 hover:text-slate-600">
+            <i class="fa-solid fa-xmark text-sm sm:text-xs"></i>
           </button>
         </div>
 
         <!-- ปุ่มเปิดกล่องเลือก Location (มี Keyword + ติ๊กหลายอัน + Clear) -->
         <div class="relative">
-          <button id="locationFilterBtn" onclick="toggleLocationDropdown()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium px-3 py-2 rounded-lg flex items-center gap-1.5 transition-all border border-slate-200 whitespace-nowrap">
+          <button id="locationFilterBtn" onclick="toggleLocationDropdown()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm sm:text-xs font-medium px-3 py-2.5 sm:py-2 rounded-lg flex items-center gap-1.5 transition-all border border-slate-200 whitespace-nowrap">
             <i id="locationFilterIcon" class="fa-solid fa-filter text-blue-600"></i> <span id="locationFilterLabel">สถานที่ทั้งหมด</span> <i class="fa-solid fa-chevron-down text-[10px]"></i>
           </button>
 
@@ -179,12 +233,12 @@
         </div>
 
         <!-- ปุ่มเพิ่มรายการนอกสุ่ม -->
-        <button onclick="openAddExtraModal()" class="bg-purple-600 hover:bg-purple-700 text-white text-xs font-medium px-3 py-2 rounded-lg flex items-center gap-1 transition-all shadow-sm whitespace-nowrap">
+        <button onclick="openAddExtraModal()" class="hidden sm:flex bg-purple-600 hover:bg-purple-700 text-white text-xs font-medium px-3 py-2 rounded-lg items-center gap-1 transition-all shadow-sm whitespace-nowrap">
           <i class="fa-solid fa-plus"></i> <span>เพิ่มนอกสุ่ม</span>
         </button>
 
         <!-- ปุ่มเปิดสแกนเนอร์ -->
-        <button onclick="openScannerModal()" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium px-3 py-2 rounded-lg flex items-center gap-1 transition-all shadow-sm whitespace-nowrap">
+        <button onclick="openScannerModal()" class="hidden sm:flex bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium px-3 py-2 rounded-lg items-center gap-1 transition-all shadow-sm whitespace-nowrap">
           <i class="fa-solid fa-qrcode"></i> <span>สแกน</span>
         </button>
       </div>
@@ -203,14 +257,14 @@
       <div id="activeFilterChips" class="flex gap-1.5 flex-wrap items-center text-xs"></div>
 
       <!-- Status & Group Tabs -->
-      <div class="flex gap-1 overflow-x-auto pb-1 text-[11px]">
-        <button onclick="filterStatus('all')" id="tab-all" class="filter-tab px-3 py-1 rounded-md font-medium bg-blue-600 text-white whitespace-nowrap shadow-sm">ทั้งหมด (0)</button>
-        <button onclick="filterStatus('ยังไม่ตรวจ')" id="tab-ยังไม่ตรวจ" class="filter-tab px-3 py-1 rounded-md font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap">ยังไม่ตรวจ</button>
-        <button onclick="filterStatus('ดี')" id="tab-ดี" class="filter-tab px-3 py-1 rounded-md font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap">สภาพดี</button>
-        <button onclick="filterStatus('ชำรุด')" id="tab-ชำรุด" class="filter-tab px-3 py-1 rounded-md font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap">ชำรุด</button>
-        <button onclick="filterStatus('สูญหาย')" id="tab-สูญหาย" class="filter-tab px-3 py-1 rounded-md font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap">สูญหาย</button>
-        <button onclick="filterStatus('สุ่ม')" id="tab-สุ่ม" class="filter-tab px-3 py-1 rounded-md font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap">🎯 รายการสุ่ม</button>
-        <button onclick="filterStatus('นอกสุ่ม')" id="tab-นอกสุ่ม" class="filter-tab px-3 py-1 rounded-md font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap">➕ เพิ่มใหม่</button>
+      <div class="flex gap-1 overflow-x-auto pb-1 text-xs sm:text-[11px]">
+        <button onclick="filterStatus('all')" id="tab-all" class="filter-tab px-3 py-1.5 sm:py-1 rounded-md font-medium bg-blue-600 text-white whitespace-nowrap shadow-sm">ทั้งหมด (0)</button>
+        <button onclick="filterStatus('ยังไม่ตรวจ')" id="tab-ยังไม่ตรวจ" class="filter-tab px-3 py-1.5 sm:py-1 rounded-md font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap">ยังไม่ตรวจ</button>
+        <button onclick="filterStatus('ดี')" id="tab-ดี" class="filter-tab px-3 py-1.5 sm:py-1 rounded-md font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap">สภาพดี</button>
+        <button onclick="filterStatus('ชำรุด')" id="tab-ชำรุด" class="filter-tab px-3 py-1.5 sm:py-1 rounded-md font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap">ชำรุด</button>
+        <button onclick="filterStatus('สูญหาย')" id="tab-สูญหาย" class="filter-tab px-3 py-1.5 sm:py-1 rounded-md font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap">สูญหาย</button>
+        <button onclick="filterStatus('สุ่ม')" id="tab-สุ่ม" class="filter-tab px-3 py-1.5 sm:py-1 rounded-md font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap">🎯 รายการสุ่ม</button>
+        <button onclick="filterStatus('นอกสุ่ม')" id="tab-นอกสุ่ม" class="filter-tab px-3 py-1.5 sm:py-1 rounded-md font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap">➕ เพิ่มใหม่</button>
       </div>
     </div>
 
@@ -219,6 +273,16 @@
     <div id="paginationContainer" class="flex justify-center items-center gap-1 pt-2"></div>
 
   </main>
+
+  <!-- มือถือ: แถบปุ่มล่างจอ นิ้วโป้งกดถึง -->
+  <div class="sm:hidden fixed bottom-0 inset-x-0 z-40 bg-white border-t border-slate-200 px-3 pt-2.5 flex gap-2 shadow-[0_-2px_8px_rgba(0,0,0,0.06)]" style="padding-bottom: calc(10px + env(safe-area-inset-bottom));">
+    <button onclick="openAddExtraModal()" class="flex-1 h-12 rounded-xl bg-purple-50 text-purple-700 border border-purple-200 text-sm font-medium flex items-center justify-center gap-1.5">
+      <i class="fa-solid fa-plus"></i> เพิ่มนอกสุ่ม
+    </button>
+    <button onclick="openScannerModal()" class="flex-[2] h-12 rounded-xl bg-blue-600 text-white text-base font-bold flex items-center justify-center gap-2 shadow-sm">
+      <i class="fa-solid fa-qrcode text-lg"></i> สแกน
+    </button>
+  </div>
 
   <!-- Modal เพิ่มรายการนอกสุ่ม (เน้นกรอกแค่เลข + สถานที่ + สภาพ + รูป) -->
   <div id="addExtraModal" class="fixed inset-0 bg-black/70 z-50 hidden flex items-center justify-center p-4">
@@ -458,6 +522,36 @@
       window.addEventListener('resize', syncHeaderHeight);
     }
 
+    // --- มือถือ: เมนู ☰, การ์ดผู้ตรวจ, รายละเอียดแดชบอร์ด, ส่วนป้าย/หมายเหตุในการ์ด ---
+    function toggleMobileMenu() {
+      const menu = document.getElementById('mobileMenu');
+      const open = menu.classList.toggle('hidden') === false;
+      document.getElementById('mobileMenuIcon').className = open ? 'fa-solid fa-xmark text-lg' : 'fa-solid fa-bars text-lg';
+    }
+    function closeMobileMenu() {
+      document.getElementById('mobileMenu').classList.add('hidden');
+      document.getElementById('mobileMenuIcon').className = 'fa-solid fa-bars text-lg';
+    }
+    function toggleMetaCard(show) {
+      const card = document.getElementById('metaCard');
+      card.classList.toggle('hidden', !show);
+      if (show) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    function toggleDashDetails() {
+      const d = document.getElementById('dashDetails');
+      const open = d.classList.toggle('hidden') === false;
+      document.getElementById('dashToggleBtn').innerHTML = open
+        ? 'ซ่อนกราฟ <i class="fa-solid fa-chevron-up text-[10px]"></i>'
+        : 'ดูกราฟ <i class="fa-solid fa-chevron-down text-[10px]"></i>';
+      if (open && myChart) myChart.resize();
+    }
+    // การ์ดที่กางส่วน "ป้าย / หมายเหตุ" ไว้ (จำไว้ เพราะรายการถูกวาดใหม่ทุกครั้งที่ข้อมูลเปลี่ยน)
+    const expandedCards = new Set();
+    function toggleCardExtra(docId) {
+      if (expandedCards.has(docId)) expandedCards.delete(docId); else expandedCards.add(docId);
+      renderList();
+    }
+
     window.onload = function() {
       initChart();
 
@@ -512,6 +606,7 @@
           trashAssets.push({ trashId: doc.id, ...doc.data() });
         });
         document.getElementById('trashCountBadge').innerText = trashAssets.length;
+        document.getElementById('trashCountBadgeMobile').innerText = trashAssets.length;
       });
 
       db.collection("skyai_image_trash_v9").onSnapshot((snapshot) => {
@@ -520,6 +615,7 @@
           imageTrash.push({ trashImgId: doc.id, ...doc.data() });
         });
         document.getElementById('imgTrashCountBadge').innerText = imageTrash.length;
+        document.getElementById('imgTrashCountBadgeMobile').innerText = imageTrash.length;
       });
     };
 
@@ -797,9 +893,9 @@
       const kwInput = document.getElementById('locationKeywordInput');
       if (kwInput) kwInput.value = '';
 
-      document.querySelectorAll('.filter-tab').forEach(btn => btn.className = "filter-tab px-3 py-1 rounded-md font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap");
+      document.querySelectorAll('.filter-tab').forEach(btn => btn.className = "filter-tab px-3 py-1.5 sm:py-1 rounded-md font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap");
       const allTab = document.getElementById('tab-all');
-      if (allTab) allTab.className = "filter-tab px-3 py-1 rounded-md font-medium bg-blue-600 text-white whitespace-nowrap shadow-sm";
+      if (allTab) allTab.className = "filter-tab px-3 py-1.5 sm:py-1 rounded-md font-medium bg-blue-600 text-white whitespace-nowrap shadow-sm";
 
       syncLocationFilterLabel();
       renderLocationCheckboxes();
@@ -1629,6 +1725,10 @@
       document.getElementById('cntSampled').innerText = sampled;
       document.getElementById('cntExtra').innerText = extra;
       document.getElementById('progressBadge').innerText = `${done} / ${total} (${pct}%)`;
+      document.getElementById('progressBar').style.width = pct + '%';
+      document.getElementById('mGood').innerText = good;
+      document.getElementById('mDamage').innerText = damage;
+      document.getElementById('mLost').innerText = lost;
 
       if (myChart) {
         myChart.data.datasets[0].data = [good, damage, lost];
@@ -1639,8 +1739,8 @@
     function filterStatus(status) {
       currentFilter = status;
       currentPage = 1;
-      document.querySelectorAll('.filter-tab').forEach(btn => btn.className = "filter-tab px-3 py-1 rounded-md font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap");
-      document.getElementById('tab-' + status).className = "filter-tab px-3 py-1 rounded-md font-medium bg-blue-600 text-white whitespace-nowrap shadow-sm";
+      document.querySelectorAll('.filter-tab').forEach(btn => btn.className = "filter-tab px-3 py-1.5 sm:py-1 rounded-md font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap");
+      document.getElementById('tab-' + status).className = "filter-tab px-3 py-1.5 sm:py-1 rounded-md font-medium bg-blue-600 text-white whitespace-nowrap shadow-sm";
       renderList();
     }
 
@@ -1732,34 +1832,40 @@
           ? `<span class="bg-purple-100 text-purple-800 border border-purple-200 text-[10px] font-bold px-2 py-0.5 rounded">➕ เพิ่มใหม่ (นอกสุ่ม)</span>`
           : `<span class="bg-sky-50 text-sky-700 border border-sky-200 text-[10px] font-bold px-2 py-0.5 rounded">🎯 รายการสุ่ม</span>`;
 
+        // มือถือ: ป้าย/หมายเหตุ พับเก็บไว้ (กดปุ่มเพื่อกาง) จอใหญ่: แสดงตลอดเหมือนเดิม
+        const exp = expandedCards.has(item.docId);
+        const tagNote = item.tag === 'ป้ายชำรุด' ? '⚠️ ป้ายชำรุด' : (item.tag === 'ไม่มีป้าย' ? '❌ ไม่มีป้าย' : '');
+        const extraLabel = exp ? 'ซ่อน' : `${tagNote || 'ป้าย / หมายเหตุ'}${item.remark ? ' 📝' : ''}`;
+        const statusBtnCls = 'border border-slate-200 bg-slate-50 py-2.5 sm:py-1 rounded-lg sm:rounded text-sm sm:text-[10px] font-medium';
+
         return `
         <div class="bg-white rounded-xl p-3 shadow-sm border ${isExtra ? 'border-purple-200' : 'border-slate-200'} space-y-2.5 transition-all ${borderStyle}">
           <div class="flex justify-between items-start gap-2">
-            <div>
+            <div class="min-w-0">
               <div class="flex items-center gap-1.5 flex-wrap">
                 <span class="bg-slate-900 text-white text-[10px] font-mono font-bold px-2 py-0.5 rounded">#${seqNum}</span>
                 ${groupBadge}
                 <span class="bg-slate-100 text-slate-700 text-[10px] font-bold px-2 py-0.5 rounded">${item.category}</span>
-                <span class="text-slate-500 text-[11px]"><i class="fa-solid fa-location-dot text-rose-500 mr-1"></i>${item.location || '-'}</span>
+                <span class="text-slate-500 text-xs sm:text-[11px]"><i class="fa-solid fa-location-dot text-rose-500 mr-1"></i>${item.location || '-'}</span>
               </div>
-              <h3 class="font-bold text-slate-800 text-xs mt-1.5 leading-snug">${item.name}</h3>
-              <p class="text-[11px] font-mono font-bold text-blue-600 mt-0.5"><i class="fa-solid fa-barcode mr-1"></i>${item.code}</p>
+              <h3 class="font-bold text-slate-800 text-sm sm:text-xs mt-1.5 leading-snug">${item.name}</h3>
+              <p class="text-sm sm:text-[11px] font-mono font-bold text-blue-600 mt-0.5"><i class="fa-solid fa-barcode mr-1"></i>${item.code}</p>
             </div>
-            ${item.status ? `<span class="text-[10px] font-bold px-2 py-0.5 rounded ${badgeStyle}">${item.status}</span>` : ''}
+            ${item.status ? `<span class="shrink-0 text-xs sm:text-[10px] font-bold px-2 py-0.5 rounded ${badgeStyle}">${item.status}</span>` : ''}
           </div>
 
-          <div class="grid grid-cols-2 gap-2 text-xs">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
             <div>
-              <label class="block text-[10px] text-slate-500 mb-1 font-medium">สถานะการตรวจ:</label>
-              <div class="grid grid-cols-3 gap-1">
-                <button onclick="setStatus('${item.docId}', 'ดี', '${item.status}')" class="status-btn active-${item.status === 'ดี' ? 'ดี' : ''} border border-slate-200 bg-slate-50 py-1 rounded text-[10px] font-medium">ดี</button>
-                <button onclick="setStatus('${item.docId}', 'ชำรุด', '${item.status}')" class="status-btn active-${item.status === 'ชำรุด' ? 'ชำรุด' : ''} border border-slate-200 bg-slate-50 py-1 rounded text-[10px] font-medium">ชำรุด</button>
-                <button onclick="setStatus('${item.docId}', 'สูญหาย', '${item.status}')" class="status-btn active-${item.status === 'สูญหาย' ? 'สูญหาย' : ''} border border-slate-200 bg-slate-50 py-1 rounded text-[10px] font-medium">สูญหาย</button>
+              <label class="hidden sm:block text-[10px] text-slate-500 mb-1 font-medium">สถานะการตรวจ:</label>
+              <div class="grid grid-cols-3 gap-1.5 sm:gap-1">
+                <button onclick="setStatus('${item.docId}', 'ดี', '${item.status}')" class="status-btn active-${item.status === 'ดี' ? 'ดี' : ''} ${statusBtnCls}">ดี</button>
+                <button onclick="setStatus('${item.docId}', 'ชำรุด', '${item.status}')" class="status-btn active-${item.status === 'ชำรุด' ? 'ชำรุด' : ''} ${statusBtnCls}">ชำรุด</button>
+                <button onclick="setStatus('${item.docId}', 'สูญหาย', '${item.status}')" class="status-btn active-${item.status === 'สูญหาย' ? 'สูญหาย' : ''} ${statusBtnCls}">สูญหาย</button>
               </div>
             </div>
-            <div>
-              <label class="block text-[10px] text-slate-500 mb-1 font-medium">สถานะป้าย:</label>
-              <select onchange="setTag('${item.docId}', this.value)" class="w-full bg-slate-50 border border-slate-200 rounded p-1.5 text-[11px] text-slate-700 font-medium focus:outline-none">
+            <div class="${exp ? '' : 'hidden'} sm:block">
+              <label class="block text-xs sm:text-[10px] text-slate-500 mb-1 font-medium">สถานะป้าย:</label>
+              <select onchange="setTag('${item.docId}', this.value)" class="w-full bg-slate-50 border border-slate-200 rounded-lg sm:rounded p-2.5 sm:p-1.5 text-base sm:text-[11px] text-slate-700 font-medium focus:outline-none">
                 <option value="มีป้าย" ${item.tag === 'มีป้าย' ? 'selected' : ''}>🏷️ มีป้ายสมบูรณ์</option>
                 <option value="ป้ายชำรุด" ${item.tag === 'ป้ายชำรุด' ? 'selected' : ''}>⚠️ ป้ายชำรุด</option>
                 <option value="ไม่มีป้าย" ${item.tag === 'ไม่มีป้าย' ? 'selected' : ''}>❌ ไม่มีป้าย</option>
@@ -1768,14 +1874,17 @@
           </div>
 
           <div class="flex items-center gap-2 pt-1.5 border-t border-slate-100 flex-wrap">
-            <label class="cursor-pointer bg-slate-800 hover:bg-slate-900 text-white text-[11px] font-medium px-2.5 py-1.5 rounded flex items-center gap-1 transition-all shadow-sm">
+            <label class="cursor-pointer bg-slate-800 hover:bg-slate-900 text-white text-sm sm:text-[11px] font-medium px-3 sm:px-2.5 py-2.5 sm:py-1.5 rounded-lg sm:rounded flex items-center gap-1.5 sm:gap-1 transition-all shadow-sm">
               <i class="fa-solid fa-camera"></i> ถ่ายรูป
               <input type="file" accept="image/*" capture="environment" multiple onchange="compressAndAttachImage('${item.docId}', event)" class="hidden">
             </label>
-            ${imgCount > 0 ? `<button onclick="openGallery('${item.docId}')" class="bg-blue-50 hover:bg-blue-100 text-blue-700 text-[11px] font-medium px-2.5 py-1.5 rounded flex items-center gap-1 transition-all"><i class="fa-solid fa-images"></i> รูปภาพ (${imgCount})</button>` : '<span class="text-[10px] text-slate-400">ยังไม่มีรูป</span>'}
-            <input type="text" value="${item.remark || ''}" onchange="setRemark('${item.docId}', this.value)" placeholder="หมายเหตุ..." class="flex-1 min-w-[130px] bg-slate-50 border border-slate-200 rounded px-2 py-1 text-[11px] text-slate-700 focus:outline-none">
-            <button onclick="deleteSingleAsset('${item.docId}')" title="ลบรายการนี้ (ย้ายไปถังขยะ)" aria-label="ลบรายการนี้" class="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 text-[11px] font-medium px-2.5 py-1.5 rounded flex items-center gap-1 transition-all">
-              <i class="fa-solid fa-trash-can"></i> ลบ
+            ${imgCount > 0 ? `<button onclick="openGallery('${item.docId}')" class="bg-blue-50 hover:bg-blue-100 text-blue-700 text-sm sm:text-[11px] font-medium px-3 sm:px-2.5 py-2.5 sm:py-1.5 rounded-lg sm:rounded flex items-center gap-1.5 sm:gap-1 transition-all"><i class="fa-solid fa-images"></i> รูป (${imgCount})</button>` : '<span class="text-xs sm:text-[10px] text-slate-400">ยังไม่มีรูป</span>'}
+            <button onclick="toggleCardExtra('${item.docId}')" class="sm:hidden border text-sm font-medium px-3 py-2.5 rounded-lg flex items-center gap-1.5 ${tagNote && !exp ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-slate-50 border-slate-200 text-slate-700'}">
+              <i class="fa-solid ${exp ? 'fa-chevron-up' : 'fa-tag'}"></i> ${extraLabel}
+            </button>
+            <input type="text" value="${item.remark || ''}" onchange="setRemark('${item.docId}', this.value)" placeholder="หมายเหตุ..." class="${exp ? '' : 'hidden'} sm:block basis-full sm:basis-auto order-last sm:order-none flex-1 min-w-[130px] bg-slate-50 border border-slate-200 rounded-lg sm:rounded px-2.5 sm:px-2 py-2.5 sm:py-1 text-base sm:text-[11px] text-slate-700 focus:outline-none">
+            <button onclick="deleteSingleAsset('${item.docId}')" title="ลบรายการนี้ (ย้ายไปถังขยะ)" aria-label="ลบรายการนี้" class="ml-auto sm:ml-0 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 text-sm sm:text-[11px] font-medium px-3 sm:px-2.5 py-2.5 sm:py-1.5 rounded-lg sm:rounded flex items-center gap-1 transition-all">
+              <i class="fa-solid fa-trash-can"></i><span class="hidden sm:inline"> ลบ</span>
             </button>
           </div>
         </div>
