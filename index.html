@@ -566,40 +566,10 @@
         lastUsedLocation = savedLastLoc;
       }
 
-      db.collection("skyai_assets_v9_clean").onSnapshot((snapshot) => {
-        if (snapshot.empty) {
-          assets = [];
-        } else {
-          assets = [];
-          snapshot.forEach((doc) => {
-            const data = doc.data();
-            let imgs = data.images || [];
-            if (data.image && imgs.length === 0) imgs = [data.image];
-            const auditType = data.auditType || 'สุ่ม';
-            assets.push({ docId: doc.id, ...data, images: imgs, auditType });
-          });
-          assets.sort((a, b) => a.id - b.id);
-          
-          const companies = [...new Set(assets.map(a => a.company))];
-          companies.forEach(comp => {
-            if (!companyMetadata[comp]) {
-              companyMetadata[comp] = { inspector: "", date: "" };
-            }
-          });
-
-          if (!companies.includes(currentCompany) && companies.length > 0) {
-            currentCompany = companies[0];
-          }
-
-          updateCompanyTabs();
-          syncMetaUI();
-          renderLocationCheckboxes();
-          syncLocationDatalist();
-          renderList();
-          updateTabCounts();
-          updateDashboard();
-        }
-      });
+      // โหลดเฉพาะบริษัทที่เปิดอยู่ (เดิมโหลดทุกบริษัท ~1,750 รายการทุกครั้งที่เปิดแอป)
+      // รายชื่อบริษัทมาจากเอกสารเล็ก ๆ skyai_meta/companies, จำนวนบน Tab มาจากการนับฝั่งเซิร์ฟเวอร์
+      try { currentCompany = localStorage.getItem('skyai_last_company') || currentCompany; } catch (e) {}
+      watchCompanyList();
 
       // ถังขยะไม่โหลดตอนเปิดแอปแล้ว (หนัก ~12 MB) ขอแค่ตัวเลขจำนวนจาก Firestore
       // ตัวข้อมูลจะโหลดตอนกดเปิดถังขยะ (ensureTrashListener / ensureImageTrashListener)
@@ -683,6 +653,117 @@
     }
 
     const trashLoadingHtml = `<div class="text-center text-slate-400 text-xs py-8"><i class="fa-solid fa-spinner fa-spin mr-1"></i> กำลังโหลดถังขยะ...</div>`;
+
+    // --- โหลดข้อมูลทีละบริษัท ---
+    const ASSETS_COL = "skyai_assets_v9_clean";
+    const companyListRef = db.collection("skyai_meta").doc("companies");
+    let companyNames = [];          // รายชื่อบริษัททั้งหมด (จาก skyai_meta/companies)
+    let companyCounts = {};         // จำนวนรายการของแต่ละบริษัท (นับฝั่งเซิร์ฟเวอร์)
+    let assetsUnsub = null;         // ตัวยกเลิก listener ของบริษัทที่เปิดอยู่
+    let assetsLoading = true;
+    let companyListSeeding = false;
+
+    function normalizeAsset(doc) {
+      const data = doc.data();
+      let imgs = data.images || [];
+      if (data.image && imgs.length === 0) imgs = [data.image];
+      return { docId: doc.id, ...data, images: imgs, auditType: data.auditType || 'สุ่ม' };
+    }
+
+    function watchCompanyList() {
+      companyListRef.onSnapshot((snap) => {
+        const names = (snap.exists && Array.isArray(snap.data().names)) ? snap.data().names : null;
+        if (!names) { seedCompanyList(); return; }
+        companyNames = [...names].sort((a, b) => String(a).localeCompare(String(b), 'th'));
+        companyNames.forEach(comp => {
+          if (!companyMetadata[comp]) companyMetadata[comp] = { inspector: "", date: "" };
+        });
+        const target = companyNames.includes(currentCompany) ? currentCompany : (companyNames[0] || 'SKYAI');
+        if (target !== currentCompany || !assetsUnsub) switchCompany(target);
+        else updateCompanyTabs();
+        refreshCompanyCounts();
+      }, (err) => showAssetsError(err));
+    }
+
+    // ครั้งแรกที่ยังไม่มีรายชื่อบริษัท: อ่านเฉพาะช่อง company ของทุกรายการ (ไม่ดึงรูป) ผ่าน REST แล้วบันทึกรายชื่อไว้
+    async function seedCompanyList() {
+      if (companyListSeeding) return;
+      companyListSeeding = true;
+      try {
+        const names = new Set();
+        let pageToken = '';
+        do {
+          const url = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/(default)/documents/${ASSETS_COL}` +
+            `?pageSize=500&mask.fieldPaths=company&key=${firebaseConfig.apiKey}` + (pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '');
+          const res = await fetch(url);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const page = await res.json();
+          (page.documents || []).forEach(d => { const c = d.fields && d.fields.company && d.fields.company.stringValue; if (c) names.add(c); });
+          pageToken = page.nextPageToken || '';
+        } while (pageToken);
+        await companyListRef.set({ names: [...names] }, { merge: true });
+      } catch (err) {
+        showAssetsError(err);
+      } finally {
+        companyListSeeding = false;
+      }
+    }
+
+    function addCompanyName(name) {
+      if (name) companyListRef.set({ names: firebase.firestore.FieldValue.arrayUnion(name) }, { merge: true }).catch(() => {});
+    }
+    function removeCompanyName(name) {
+      if (name) companyListRef.set({ names: firebase.firestore.FieldValue.arrayRemove(name) }, { merge: true }).catch(() => {});
+    }
+
+    async function refreshCompanyCounts() {
+      try {
+        const { fs, db: cdb } = await getCountDb();
+        await Promise.all(companyNames.map(async (c) => {
+          if (c === currentCompany && !assetsLoading) return; // บริษัทที่เปิดอยู่ใช้จำนวนจริงจากรายการ
+          const s = await fs.getCountFromServer(fs.query(fs.collection(cdb, ASSETS_COL), fs.where('company', '==', c)));
+          companyCounts[c] = s.data().count;
+        }));
+        updateCompanyTabs();
+      } catch (e) {
+        console.warn('นับจำนวนรายการต่อบริษัทไม่สำเร็จ', e);
+      }
+    }
+
+    function subscribeCompany(company) {
+      if (assetsUnsub) { assetsUnsub(); assetsUnsub = null; }
+      assets = [];
+      assetsLoading = true;
+      assetsUnsub = db.collection(ASSETS_COL).where('company', '==', company).onSnapshot((snapshot) => {
+        if (company !== currentCompany) return;
+        assets = [];
+        snapshot.forEach((doc) => assets.push(normalizeAsset(doc)));
+        assets.sort((a, b) => a.id - b.id);
+        assetsLoading = false;
+        companyCounts[company] = assets.length;
+        updateCompanyTabs();
+        syncMetaUI();
+        renderLocationCheckboxes();
+        syncLocationDatalist();
+        renderList();
+        updateTabCounts();
+        updateDashboard();
+      }, (err) => showAssetsError(err));
+    }
+
+    function showAssetsError(err) {
+      const quota = err && (err.code === 'resource-exhausted' || /quota/i.test(err.message || ''));
+      document.getElementById('assetList').innerHTML = `<div class="bg-white rounded-xl p-6 text-center text-red-600 text-sm">` +
+        (quota ? 'โควต้าการใช้งานฐานข้อมูลของวันนี้หมดแล้ว จะใช้ได้อีกครั้งหลังประมาณ 15:00 น.' : `โหลดข้อมูลไม่สำเร็จ: ${err && err.message}`) + `</div>`;
+    }
+
+    // หาเอกสารทรัพย์สินจาก docId: ใช้ของที่โหลดไว้ก่อน ถ้าไม่มี (อยู่บริษัทอื่น) ค่อยอ่านจากฐานข้อมูล 1 ครั้ง
+    async function getAssetById(docId) {
+      const local = assets.find(a => a.docId === docId);
+      if (local) return local;
+      const doc = await db.collection(ASSETS_COL).doc(docId).get();
+      return doc.exists ? normalizeAsset(doc) : null;
+    }
 
     function updateCompanyMeta(field, value) {
       if (!companyMetadata[currentCompany]) {
@@ -1001,14 +1082,10 @@
           await batch.commit();
         }
 
-        currentCompany = sanitizedNewName;
-        updateCompanyTabs();
-        syncMetaUI();
-        renderLocationCheckboxes();
-        syncLocationDatalist();
-        renderList();
-        updateTabCounts();
-        updateDashboard();
+        const oldName = currentCompany;
+        addCompanyName(sanitizedNewName);
+        removeCompanyName(oldName);
+        switchCompany(sanitizedNewName);
         alert(`เปลี่ยนชื่อ Tab เป็น "${sanitizedNewName}" เรียบร้อยแล้ว!`);
       } catch (err) {
         alert("เกิดข้อผิดพลาดในการเปลี่ยนชื่อ: " + err.message);
@@ -1068,11 +1145,11 @@
       document.getElementById('imageTrashModal').classList.add('hidden');
     }
 
-    function restoreSingleImage(trashImgId) {
+    async function restoreSingleImage(trashImgId) {
       const item = imageTrash.find(i => i.trashImgId === trashImgId);
       if (!item) return;
 
-      const targetAsset = assets.find(a => a.docId === item.assetDocId);
+      const targetAsset = await getAssetById(item.assetDocId).catch(() => null);
       if (!targetAsset) {
         alert("ไม่สามารถกู้คืนได้ เนื่องจากสินทรัพย์หลักถูกลบไปแล้ว");
         return;
@@ -1134,6 +1211,8 @@
       batch.delete(db.collection("skyai_trash_v9").doc(trashId));
       batch.commit().then(() => {
         alert(`กู้คืนรายการ ${item.code} เรียบร้อยแล้ว`);
+        addCompanyName(item.company); // เผื่อบริษัทนั้นถูกลบทั้ง Tab ไปแล้ว
+        refreshCompanyCounts();
         openTrashModal();
       }).catch(err => alert("กู้คืนไม่สำเร็จ: " + err.message));
     }
@@ -1234,7 +1313,8 @@
 
       batch.commit().then(() => {
         alert(`กู้คืนบริษัท "${compName}" และรูปถ่ายทั้งหมดสำเร็จเรียบร้อย!`);
-        currentCompany = compName;
+        addCompanyName(compName);
+        switchCompany(compName);
         closeTrashModal();
       }).catch(err => alert("กู้คืนไม่สำเร็จ: " + err.message));
     }
@@ -1318,17 +1398,12 @@
 
       batch.commit().then(() => {
         refreshTrashCounts();
-        delete companyMetadata[currentCompany];
-        alert(`ย้ายข้อมูลบริษัท "${currentCompany}" ไปยังถังขยะเรียบร้อยแล้ว`);
-        const remaining = [...new Set(assets.map(a => a.company))].filter(c => c !== currentCompany);
-        currentCompany = remaining.length > 0 ? remaining[0] : 'SKYAI';
-        updateCompanyTabs();
-        syncMetaUI();
-        renderLocationCheckboxes();
-        syncLocationDatalist();
-        renderList();
-        updateTabCounts();
-        updateDashboard();
+        const deleted = currentCompany;
+        delete companyMetadata[deleted];
+        alert(`ย้ายข้อมูลบริษัท "${deleted}" ไปยังถังขยะเรียบร้อยแล้ว`);
+        removeCompanyName(deleted);
+        const remaining = companyNames.filter(c => c !== deleted);
+        switchCompany(remaining.length > 0 ? remaining[0] : 'SKYAI');
       }).catch(err => alert("ลบไม่สำเร็จ: " + err.message));
     }
 
@@ -1392,15 +1467,30 @@
           const now = Date.now();
           if (cleanCode === lastScannedRawCode && (now - lastScanTimestamp) < 1800) return;
 
-          const found = assets.find(a =>
-            (a.company === currentCompany || true) &&
-            (String(a.code || '').trim().toLowerCase() === lowerCode ||
-             (cleanCode.length >= 4 && String(a.code || '').toLowerCase().includes(lowerCode)))
+          // หาในบริษัทที่เปิดอยู่ก่อน (โหลดไว้แล้ว)
+          const localFound = assets.find(a =>
+            String(a.code || '').trim().toLowerCase() === lowerCode ||
+            (cleanCode.length >= 4 && String(a.code || '').toLowerCase().includes(lowerCode))
           );
 
           lastScannedRawCode = cleanCode;
           lastScanTimestamp = now;
 
+          if (localFound) { onScanResult(localFound, cleanCode, isContinuous); return; }
+
+          // ไม่เจอ: ค้นเลขทะเบียนแบบตรงตัวในบริษัทอื่นจากฐานข้อมูล (อ่านแค่ 1 รายการ)
+          try { html5QrCode.pause(); } catch (e) {}
+          db.collection(ASSETS_COL).where('code', '==', cleanCode).limit(1).get()
+            .then(snap => onScanResult(snap.empty ? null : normalizeAsset(snap.docs[0]), cleanCode, isContinuous))
+            .catch(() => onScanResult(null, cleanCode, isContinuous));
+        },
+        (errorMessage) => {}
+      ).then(() => {
+        setupCameraTrack();
+      }).catch(err => alert("ไม่สามารถเปิดกล้องได้: " + err));
+    }
+
+    function onScanResult(found, cleanCode, isContinuous) {
           if (found) {
             if (found.company !== currentCompany) {
               switchCompany(found.company);
@@ -1417,7 +1507,7 @@
             } catch(e){}
 
             if (isContinuous) {
-              html5QrCode.pause();
+              try { html5QrCode.pause(); } catch (e) {} // อาจหยุดไว้แล้วตอนค้นบริษัทอื่น
               scannedTargetDocId = found.docId;
               document.getElementById('popupAssetCode').innerText = found.code;
               document.getElementById('popupAssetName').innerText = found.name;
@@ -1444,11 +1534,6 @@
             document.getElementById('notFoundScannedCode').innerText = cleanCode;
             document.getElementById('scanNotFoundPopup').classList.remove('hidden');
           }
-        },
-        (errorMessage) => {}
-      ).then(() => {
-        setupCameraTrack();
-      }).catch(err => alert("ไม่สามารถเปิดกล้องได้: " + err));
     }
 
     // ตั้งโฟกัสอัตโนมัติ + ซูม ตามที่กล้องเครื่องนั้นรองรับจริง
@@ -1563,16 +1648,17 @@
       }).catch(err => alert("บันทึกไม่สำเร็จ: " + err.message));
     }
 
-    function quickAttachImage(event) {
+    async function quickAttachImage(event) {
       if (!scannedTargetDocId) return;
       const files = event.target.files;
       if (!files || files.length === 0) return;
+      const file = files[0];
+      const targetDocId = scannedTargetDocId;
 
-      const target = assets.find(a => a.docId === scannedTargetDocId);
+      const target = await getAssetById(targetDocId).catch(() => null);
       if (!target) return;
 
       let currentImgs = [...(target.images || [])];
-      const file = files[0];
 
       const reader = new FileReader();
       reader.onload = function(e) {
@@ -1587,7 +1673,7 @@
           canvas.getContext('2d').drawImage(img, 0, 0, width, height);
 
           currentImgs.push(canvas.toDataURL('image/jpeg', 0.65));
-          db.collection("skyai_assets_v9_clean").doc(scannedTargetDocId).update({
+          db.collection("skyai_assets_v9_clean").doc(targetDocId).update({
             images: currentImgs
           }).then(() => {
             alert("บันทึกรูปถ่ายด่วนสำเร็จ!");
@@ -1677,6 +1763,7 @@
               companyMetadata[companyName] = { inspector: "", date: "" };
               localStorage.setItem('skyai_meta', JSON.stringify(companyMetadata));
               alert(`นำเข้าข้อมูลบริษัท "${companyName}" สำเร็จทั้งหมด ${importedCount} รายการครบถ้วน!`);
+              addCompanyName(companyName);
               switchCompany(companyName);
             }).catch(err => {
               alert("บันทึกลงฐานข้อมูลไม่สำเร็จ: " + err.message);
@@ -1693,20 +1780,23 @@
     }
 
     function updateCompanyTabs() {
-      const companies = [...new Set(assets.map(a => a.company))];
-      if (companies.length === 0) companies.push('SKYAI');
+      const companies = companyNames.length ? [...companyNames] : ['SKYAI'];
 
       const container = document.getElementById('companyTabsContainer');
-      container.innerHTML = companies.map(comp => `
+      container.innerHTML = companies.map(comp => {
+        const n = (comp === currentCompany && !assetsLoading) ? assets.length : companyCounts[comp];
+        return `
         <button onclick="switchCompany('${comp}')" id="company-tab-${comp}" class="company-tab px-3 py-1.5 rounded-lg font-bold text-xs ${currentCompany === comp ? 'bg-slate-900 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'} whitespace-nowrap transition-all">
-          🏢 ${comp} (${assets.filter(a => a.company === comp).length})
+          🏢 ${comp} (${n === undefined ? '…' : n})
         </button>
-      `).join('');
+      `}).join('');
       document.getElementById('activeCompanyLabel').innerText = currentCompany;
     }
 
     function switchCompany(company) {
       currentCompany = company;
+      try { localStorage.setItem('skyai_last_company', company); } catch (e) {}
+      subscribeCompany(company);
       currentPage = 1;
       selectedLocations = [];
       syncLocationFilterLabel();
@@ -1924,7 +2014,9 @@
       }
 
       if (filtered.length === 0) {
-        container.innerHTML = `<div class="bg-white rounded-xl p-6 text-center text-slate-400 text-xs font-medium">ไม่พบรายการสินทรัพย์</div>`;
+        container.innerHTML = assetsLoading
+          ? `<div class="bg-white rounded-xl p-6 text-center text-slate-400 text-sm font-medium"><i class="fa-solid fa-spinner fa-spin mr-1"></i> กำลังโหลดรายการ...</div>`
+          : `<div class="bg-white rounded-xl p-6 text-center text-slate-400 text-xs font-medium">ไม่พบรายการสินทรัพย์</div>`;
         paginationContainer.innerHTML = '';
         return;
       }
