@@ -193,14 +193,23 @@
         <!-- ปุ่มเปิดกล่องเลือก Location (มี Keyword + ติ๊กหลายอัน + Clear) -->
         <div class="relative">
           <button id="locationFilterBtn" onclick="toggleLocationDropdown()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm sm:text-xs font-medium px-3 py-2.5 sm:py-2 rounded-lg flex items-center gap-1.5 transition-all border border-slate-200 whitespace-nowrap">
-            <i id="locationFilterIcon" class="fa-solid fa-filter text-blue-600"></i> <span id="locationFilterLabel" class="max-w-[90px] sm:max-w-none truncate">สถานที่ทั้งหมด</span> <i class="fa-solid fa-chevron-down text-[10px]"></i>
+            <i id="locationFilterIcon" class="fa-solid fa-filter text-blue-600"></i> <span id="locationFilterLabel" class="max-w-[90px] sm:max-w-none truncate">ตัวกรอง</span> <i class="fa-solid fa-chevron-down text-[10px]"></i>
           </button>
 
           <div id="locationDropdown" class="hidden absolute right-0 mt-1 w-72 bg-white rounded-xl shadow-xl border border-slate-200 p-3 z-30 space-y-2">
             <div class="flex justify-between items-center text-xs font-bold border-b pb-1.5 text-slate-700">
-              <span>📍 กรองสถานที่ (เลือกได้หลายอัน)</span>
+              <span>🔎 ตัวกรอง</span>
               <button onclick="clearAllFilters()" class="text-[11px] bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-2 py-0.5 rounded font-bold">Clear</button>
             </div>
+
+            <!-- กรองเฉพาะรายการที่มีรูป -->
+            <label class="flex items-center justify-between bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg px-2 py-1.5 cursor-pointer text-xs">
+              <span class="flex items-center gap-2 text-slate-700 font-medium">
+                <input type="checkbox" id="photoOnlyChk" onchange="onPhotoOnlyChange(this.checked)" class="rounded text-blue-600 focus:ring-0"> 📸 เฉพาะที่มีรูป
+              </span>
+              <span id="photoOnlyCount" class="text-[10px] text-slate-400 font-mono"></span>
+            </label>
+            <div class="text-[11px] font-bold text-slate-500 pt-1">📍 สถานที่ (เลือกได้หลายอัน)</div>
 
             <!-- ช่องพิมพ์ Keyword ค้นหารายชื่อสถานที่ -->
             <div class="relative">
@@ -255,7 +264,6 @@
         <button onclick="filterStatus('สูญหาย')" id="tab-สูญหาย" class="filter-tab px-3 py-1.5 sm:py-1 rounded-md font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap">สูญหาย</button>
         <button onclick="filterStatus('สุ่ม')" id="tab-สุ่ม" class="filter-tab px-3 py-1.5 sm:py-1 rounded-md font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap">🎯 รายการสุ่ม</button>
         <button onclick="filterStatus('นอกสุ่ม')" id="tab-นอกสุ่ม" class="filter-tab px-3 py-1.5 sm:py-1 rounded-md font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap">➕ เพิ่มใหม่</button>
-        <button onclick="filterStatus('มีรูป')" id="tab-มีรูป" class="filter-tab px-3 py-1.5 sm:py-1 rounded-md font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap">📸 มีรูป</button>
       </div>
     </div>
 
@@ -490,6 +498,7 @@
     let currentCompany = 'SKYAI';
     let currentFilter = 'all';
     let selectedLocations = [];
+    let onlyWithPhotos = false;   // ตัวกรอง "เฉพาะที่มีรูป" (อยู่ในปุ่มตัวกรอง)
     let lastUsedLocation = '';
     let pendingExtraImages = [];
     let lastScannedRawCode = '';
@@ -1001,6 +1010,10 @@
       if (btnClearKw) btnClearKw.classList.toggle('hidden', rawKw === '');
 
       const companyAssets = assets.filter(a => a.company === currentCompany);
+      const photoChk = document.getElementById('photoOnlyChk');
+      if (photoChk) photoChk.checked = onlyWithPhotos;
+      const photoCount = document.getElementById('photoOnlyCount');
+      if (photoCount) photoCount.innerText = `(${companyAssets.filter(a => imgCountOf(a) > 0).length})`;
       const allLocations = [...new Set(companyAssets.map(a => a.location || '-'))].sort();
       const filteredLocations = kw
         ? allLocations.filter(loc => String(loc).toLowerCase().includes(kw))
@@ -1025,6 +1038,13 @@
           </label>
         `;
       }).join('');
+    }
+
+    function onPhotoOnlyChange(checked) {
+      onlyWithPhotos = !!checked;
+      syncLocationFilterLabel();
+      currentPage = 1;
+      renderList();
     }
 
     function onLocationCheckboxChange() {
@@ -1061,14 +1081,16 @@
       const label = document.getElementById('locationFilterLabel');
       const btn = document.getElementById('locationFilterBtn');
       const icon = document.getElementById('locationFilterIcon');
-      const active = selectedLocations.length > 0;
+      const nActive = selectedLocations.length + (onlyWithPhotos ? 1 : 0);
+      const active = nActive > 0;
       if (!active) {
-        // จอมือถือแคบ ใช้คำสั้น ปุ่มจะได้อยู่บรรทัดเดียวกับช่องค้นหา
-        label.innerText = window.matchMedia('(max-width: 639px)').matches ? 'สถานที่' : 'สถานที่ทั้งหมด';
-      } else if (selectedLocations.length === 1) {
+        label.innerText = 'ตัวกรอง';
+      } else if (nActive === 1 && onlyWithPhotos) {
+        label.innerText = '📸 มีรูป';
+      } else if (nActive === 1) {
         label.innerText = selectedLocations[0];
       } else {
-        label.innerText = `กรอง ${selectedLocations.length} ที่`;
+        label.innerText = `กรอง ${nActive} อย่าง`;
       }
       // ปุ่มเป็นสีน้ำเงินเมื่อกรองอยู่ จะได้ไม่ลืมว่ามีตัวกรองค้าง (ไม่แสดงป้ายสถานที่แล้ว)
       if (btn) {
@@ -1089,6 +1111,7 @@
 
     function clearAllFilters() {
       selectedLocations = [];
+      onlyWithPhotos = false;
       currentFilter = 'all';
       document.getElementById('searchInput').value = '';
       const kwInput = document.getElementById('locationKeywordInput');
@@ -1858,6 +1881,7 @@
       subscribeCompany(company);
       currentPage = 1;
       selectedLocations = [];
+      onlyWithPhotos = false;
       syncLocationFilterLabel();
       updateCompanyTabs();
       syncMetaUI();
@@ -2041,7 +2065,6 @@
       document.getElementById('tab-สูญหาย').innerText = `สูญหาย (${companyAssets.filter(a => a.status === 'สูญหาย').length})`;
       document.getElementById('tab-สุ่ม').innerText = `🎯 รายการสุ่ม (${companyAssets.filter(a => (a.auditType || 'สุ่ม') === 'สุ่ม').length})`;
       document.getElementById('tab-นอกสุ่ม').innerText = `➕ เพิ่มใหม่ (${companyAssets.filter(a => a.auditType === 'นอกสุ่ม').length})`;
-      document.getElementById('tab-มีรูป').innerText = `📸 มีรูป (${companyAssets.filter(a => imgCountOf(a) > 0).length})`;
     }
 
     function renderList() {
@@ -2070,9 +2093,10 @@
         else if (currentFilter === 'สูญหาย') matchStatus = item.status === 'สูญหาย';
         else if (currentFilter === 'สุ่ม') matchStatus = (item.auditType || 'สุ่ม') === 'สุ่ม';
         else if (currentFilter === 'นอกสุ่ม') matchStatus = item.auditType === 'นอกสุ่ม';
-        else if (currentFilter === 'มีรูป') matchStatus = imgCountOf(item) > 0;
 
-        return matchQuery && matchLocation && matchStatus;
+        const matchPhoto = !onlyWithPhotos || imgCountOf(item) > 0;
+
+        return matchQuery && matchLocation && matchStatus && matchPhoto;
       });
 
       if (query && filtered.length === 0) {
@@ -2084,7 +2108,7 @@
 
       // แสดง Chips สถานที่ที่กำลังกรอง + ปุ่ม Clear
       const chipsContainer = document.getElementById('activeFilterChips');
-      if (selectedLocations.length > 0 || currentFilter !== 'all' || query) {
+      if (selectedLocations.length > 0 || onlyWithPhotos || currentFilter !== 'all' || query) {
         // ไม่แสดงป้ายรายชื่อสถานที่แล้ว (รกเมื่อเลือกหลายที่) จำนวนที่กรองดูได้ที่ปุ่มกรองสถานที่
         let chipsHtml = '';
         chipsHtml +=`<button onclick="clearAllFilters()" class="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 text-[11px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1"><i class="fa-solid fa-rotate-left"></i> Clear กรอง</button>`;
