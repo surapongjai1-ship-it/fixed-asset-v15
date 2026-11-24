@@ -189,9 +189,9 @@
 
     <!-- Search, Location Filter, Add Extra & Scanner Bar -->
     <div id="stickySearchBar" class="bg-white rounded-xl p-3 shadow-sm border border-slate-200 space-y-2.5 sticky z-20">
-      <div class="flex gap-2 items-center flex-wrap sm:flex-nowrap">
+      <div class="flex gap-2 items-center flex-nowrap">
         <!-- ช่องค้นหาเลขทะเบียน / ชื่อ -->
-        <div class="relative flex-1 min-w-[180px]">
+        <div class="relative flex-1 min-w-0 sm:min-w-[180px]">
           <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
           <!-- มือถือใช้ตัวอักษร 16px ไม่งั้น iPhone จะซูมหน้าเองเวลาแตะช่องค้นหา -->
           <input type="text" id="searchInput" autofocus oninput="currentPage=1; renderList()" placeholder="ค้นหาเลขทะเบียน ชื่อ สถานที่..." class="w-full bg-slate-50 border border-slate-200 rounded-lg pl-8 pr-9 py-2.5 sm:py-2 text-base sm:text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono">
@@ -203,7 +203,7 @@
         <!-- ปุ่มเปิดกล่องเลือก Location (มี Keyword + ติ๊กหลายอัน + Clear) -->
         <div class="relative">
           <button id="locationFilterBtn" onclick="toggleLocationDropdown()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm sm:text-xs font-medium px-3 py-2.5 sm:py-2 rounded-lg flex items-center gap-1.5 transition-all border border-slate-200 whitespace-nowrap">
-            <i id="locationFilterIcon" class="fa-solid fa-filter text-blue-600"></i> <span id="locationFilterLabel">สถานที่ทั้งหมด</span> <i class="fa-solid fa-chevron-down text-[10px]"></i>
+            <i id="locationFilterIcon" class="fa-solid fa-filter text-blue-600"></i> <span id="locationFilterLabel" class="max-w-[90px] sm:max-w-none truncate">สถานที่ทั้งหมด</span> <i class="fa-solid fa-chevron-down text-[10px]"></i>
           </button>
 
           <div id="locationDropdown" class="hidden absolute right-0 mt-1 w-72 bg-white rounded-xl shadow-xl border border-slate-200 p-3 z-30 space-y-2">
@@ -554,6 +554,7 @@
 
     window.onload = function() {
       initChart();
+      syncLocationFilterLabel();
 
       const savedMeta = localStorage.getItem('skyai_meta');
       if (savedMeta) {
@@ -863,7 +864,8 @@
       const icon = document.getElementById('locationFilterIcon');
       const active = selectedLocations.length > 0;
       if (!active) {
-        label.innerText = 'สถานที่ทั้งหมด';
+        // จอมือถือแคบ ใช้คำสั้น ปุ่มจะได้อยู่บรรทัดเดียวกับช่องค้นหา
+        label.innerText = window.matchMedia('(max-width: 639px)').matches ? 'สถานที่' : 'สถานที่ทั้งหมด';
       } else if (selectedLocations.length === 1) {
         label.innerText = selectedLocations[0];
       } else {
