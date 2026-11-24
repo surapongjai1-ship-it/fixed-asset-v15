@@ -78,10 +78,10 @@
         <i class="fa-solid fa-file-arrow-down w-5 text-center text-sky-400"></i> โหลดฟอร์มสำหรับนำเข้า
       </button>
       <button onclick="closeMobileMenu(); openTrashModal()" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
-        <i class="fa-solid fa-folder-minus w-5 text-center text-amber-400"></i> ถังขยะ (<span id="trashCountBadgeMobile">0</span>)
+        <i class="fa-solid fa-folder-minus w-5 text-center text-amber-400"></i> ถังขยะ (<span id="trashCountBadgeMobile">…</span>)
       </button>
       <button onclick="closeMobileMenu(); openImageTrashModal()" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
-        <i class="fa-solid fa-image w-5 text-center text-purple-400"></i> ถังขยะรูป (<span id="imgTrashCountBadgeMobile">0</span>)
+        <i class="fa-solid fa-image w-5 text-center text-purple-400"></i> ถังขยะรูป (<span id="imgTrashCountBadgeMobile">…</span>)
       </button>
       <button onclick="closeMobileMenu(); renameCurrentCompany()" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
         <i class="fa-solid fa-pen-to-square w-5 text-center text-slate-300"></i> เปลี่ยนชื่อ Tab บริษัทนี้
@@ -601,22 +601,85 @@
         }
       });
 
+      // ถังขยะไม่โหลดตอนเปิดแอปแล้ว (หนัก ~12 MB) ขอแค่ตัวเลขจำนวนจาก Firestore
+      // ตัวข้อมูลจะโหลดตอนกดเปิดถังขยะ (ensureTrashListener / ensureImageTrashListener)
+      refreshTrashCounts();
+    };
+
+    // --- ถังขยะ: โหลดเมื่อเปิดใช้ + นับจำนวนฝั่งเซิร์ฟเวอร์ ---
+    let trashListening = false, trashReady = false;
+    let imageTrashListening = false, imageTrashReady = false;
+    let countDbPromise = null;
+
+    function setTrashBadge(n) { document.getElementById('trashCountBadgeMobile').innerText = n; }
+    function setImageTrashBadge(n) { document.getElementById('imgTrashCountBadgeMobile').innerText = n; }
+
+    // แอปใช้ Firebase แบบ compat ซึ่งนับจำนวนฝั่งเซิร์ฟเวอร์ไม่ได้
+    // จึงโหลด Firestore แบบ modular รุ่นเดียวกัน (9.22.0) แยกเป็นแอปชื่อ "counter" ไว้ใช้นับอย่างเดียว
+    function getCountDb() {
+      if (!countDbPromise) {
+        countDbPromise = Promise.all([
+          import('https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js'),
+          import('https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js')
+        ]).then(([appMod, fsMod]) => {
+          const app = appMod.initializeApp(firebaseConfig, 'counter');
+          return { fs: fsMod, db: fsMod.getFirestore(app) };
+        });
+      }
+      return countDbPromise;
+    }
+
+    async function refreshTrashCounts() {
+      try {
+        const { fs, db: cdb } = await getCountDb();
+        if (!trashReady) {
+          const s = await fs.getCountFromServer(fs.collection(cdb, 'skyai_trash_v9'));
+          if (!trashReady) setTrashBadge(s.data().count);
+        }
+        if (!imageTrashReady) {
+          const s = await fs.getCountFromServer(fs.collection(cdb, 'skyai_image_trash_v9'));
+          if (!imageTrashReady) setImageTrashBadge(s.data().count);
+        }
+      } catch (e) {
+        console.warn('นับจำนวนถังขยะไม่สำเร็จ', e);
+      }
+    }
+
+    function ensureTrashListener() {
+      if (trashListening) return;
+      trashListening = true;
       db.collection("skyai_trash_v9").onSnapshot((snapshot) => {
         trashAssets = [];
         snapshot.forEach((doc) => {
           trashAssets.push({ trashId: doc.id, ...doc.data() });
         });
-        document.getElementById('trashCountBadgeMobile').innerText = trashAssets.length;
+        trashReady = true;
+        setTrashBadge(trashAssets.length);
+        if (!document.getElementById('trashModal').classList.contains('hidden')) openTrashModal();
+      }, (err) => {
+        trashListening = false;
+        document.getElementById('trashListContainer').innerHTML = `<div class="text-center text-red-500 text-xs py-8">โหลดถังขยะไม่สำเร็จ: ${err.message}</div>`;
       });
+    }
 
+    function ensureImageTrashListener() {
+      if (imageTrashListening) return;
+      imageTrashListening = true;
       db.collection("skyai_image_trash_v9").onSnapshot((snapshot) => {
         imageTrash = [];
         snapshot.forEach((doc) => {
           imageTrash.push({ trashImgId: doc.id, ...doc.data() });
         });
-        document.getElementById('imgTrashCountBadgeMobile').innerText = imageTrash.length;
+        imageTrashReady = true;
+        setImageTrashBadge(imageTrash.length);
+        if (!document.getElementById('imageTrashModal').classList.contains('hidden')) openImageTrashModal();
+      }, (err) => {
+        imageTrashListening = false;
+        document.getElementById('imageTrashContainer').innerHTML = `<div class="col-span-full text-center text-red-500 text-xs py-8">โหลดถังขยะรูปไม่สำเร็จ: ${err.message}</div>`;
       });
-    };
+    }
+
+    const trashLoadingHtml = `<div class="text-center text-slate-400 text-xs py-8"><i class="fa-solid fa-spinner fa-spin mr-1"></i> กำลังโหลดถังขยะ...</div>`;
 
     function updateCompanyMeta(field, value) {
       if (!companyMetadata[currentCompany]) {
@@ -963,7 +1026,7 @@
           company: target.company,
           imageDataUrl: deletedImgUrl,
           deletedAt: new Date().toISOString()
-        });
+        }).then(refreshTrashCounts);
 
         updateAssetField(docId, 'images', updatedImgs);
         if (updatedImgs.length === 0) closeGallery();
@@ -973,6 +1036,12 @@
 
     function openImageTrashModal() {
       const container = document.getElementById('imageTrashContainer');
+      if (!imageTrashReady) {
+        ensureImageTrashListener();
+        container.innerHTML = trashLoadingHtml.replace('text-center', 'col-span-full text-center').replace('ถังขยะ...', 'ถังขยะรูป...');
+        document.getElementById('imageTrashModal').classList.remove('hidden');
+        return;
+      }
       if (imageTrash.length === 0) {
         container.innerHTML = `<div class="col-span-full text-center text-slate-400 text-xs py-8">ไม่มีรูปถ่ายในถังขยะ</div>`;
       } else {
@@ -1043,7 +1112,7 @@
       delete data.docId;
       batch.set(trashRef, { ...data, originalDocId: docId, deletedAt: new Date().toISOString(), trashType: 'item' });
       batch.delete(db.collection("skyai_assets_v9_clean").doc(docId));
-      batch.commit().catch(err => alert("ลบไม่สำเร็จ: " + err.message));
+      batch.commit().then(refreshTrashCounts).catch(err => alert("ลบไม่สำเร็จ: " + err.message));
     }
 
     function restoreSingleAsset(trashId) {
@@ -1068,6 +1137,12 @@
 
     function openTrashModal() {
       const container = document.getElementById('trashListContainer');
+      if (!trashReady) {
+        ensureTrashListener();
+        container.innerHTML = trashLoadingHtml;
+        document.getElementById('trashModal').classList.remove('hidden');
+        return;
+      }
       if (trashAssets.length === 0) {
         container.innerHTML = `<div class="text-center text-slate-400 text-xs py-8">ถังขยะ Tab ว่างเปล่า</div>`;
       } else {
@@ -1239,6 +1314,7 @@
       });
 
       batch.commit().then(() => {
+        refreshTrashCounts();
         delete companyMetadata[currentCompany];
         alert(`ย้ายข้อมูลบริษัท "${currentCompany}" ไปยังถังขยะเรียบร้อยแล้ว`);
         const remaining = [...new Set(assets.map(a => a.company))].filter(c => c !== currentCompany);
