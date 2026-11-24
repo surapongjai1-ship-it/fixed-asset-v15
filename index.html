@@ -30,6 +30,9 @@
     .status-btn.active-สูญหาย { background-color: #dc2626; color: white; border-color: #dc2626; }
     /* กล่องค้นหาติดใต้แถบหัวพอดี: --header-h ถูกอัปเดตจากความสูงแถบหัวจริง (แถบหัวสูงขึ้นเมื่อปุ่มตัดบรรทัด) */
     #stickySearchBar { top: calc(var(--header-h, 56px) + 8px); }
+    /* iPhone: ช่องวันที่มีความกว้างขั้นต่ำของตัวเอง ทำให้ล้นออกนอกกล่อง */
+    input[type="date"] { -webkit-appearance: none; appearance: none; min-width: 0; max-width: 100%; display: block; min-height: 2.25rem; }
+    input[type="date"]::-webkit-date-and-time-value { text-align: left; }
   </style>
 </head>
 <body class="pb-28">
@@ -380,14 +383,15 @@
   </div>
 
   <!-- Scanner Modal with Fast Continuous Scan Popup, Not-Found Prompt & Photo Capture -->
-  <div id="scannerModal" class="fixed inset-0 bg-black/70 z-50 hidden flex items-center justify-center p-4">
-    <div class="bg-white rounded-xl max-w-sm w-full p-4 space-y-3 shadow-2xl relative">
+  <div id="scannerModal" class="fixed inset-0 bg-black/70 z-50 hidden flex items-center justify-center p-2 sm:p-4">
+    <!-- จำกัดความสูงไม่ให้เกินจอ ถ้ายังล้นก็เลื่อนในกล่องได้ -->
+    <div class="bg-white rounded-xl max-w-sm w-full p-3 sm:p-4 space-y-3 shadow-2xl relative max-h-[calc(100dvh-1rem)] overflow-y-auto">
       <div class="flex justify-between items-center border-b pb-2">
-        <h3 class="font-bold text-xs text-slate-800"><i class="fa-solid fa-qrcode mr-1 text-blue-600"></i> สแกน QR Code (Hyper Speed)</h3>
-        <button onclick="closeScannerModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+        <h3 class="font-bold text-sm sm:text-xs text-slate-800"><i class="fa-solid fa-qrcode mr-1 text-blue-600"></i> สแกน QR / บาร์โค้ด</h3>
+        <button onclick="closeScannerModal()" aria-label="ปิดกล้อง" class="w-10 h-10 -mr-2 flex items-center justify-center text-slate-500 hover:text-slate-700 text-lg"><i class="fa-solid fa-xmark"></i></button>
       </div>
-      
-      <div id="reader" class="w-full rounded-lg overflow-hidden bg-slate-900 min-h-[220px]"></div>
+
+      <div id="reader" class="w-full mx-auto rounded-lg overflow-hidden bg-slate-900 min-h-[220px]"></div>
 
       <!-- Popup เด้งขึ้นมาเมื่อสแกนเจอเลขในระบบ -->
       <div id="scanQuickPopup" class="hidden absolute inset-x-3 top-16 bg-slate-900/95 text-white p-3.5 rounded-xl shadow-2xl space-y-2.5 z-40 border border-slate-700">
@@ -1264,6 +1268,12 @@
       lastScannedRawCode = '';
       lastScanTimestamp = 0;
       
+      // กล้องมือถือส่งภาพแนวตั้ง (สูงเกือบ 2 เท่าของความกว้าง) ทำให้กล่องสแกนล้นจอ
+      // จำกัดความกว้างของภาพก่อนเปิดกล้อง ให้ความสูงพอดีจอ (เผื่อ ~280px ให้หัวกล่องและปุ่มด้านล่าง)
+      const readerEl = document.getElementById('reader');
+      const maxVideoH = Math.max(260, window.innerHeight - 280);
+      readerEl.style.maxWidth = window.innerWidth < 640 ? Math.floor(maxVideoH * 9 / 16) + 'px' : '';
+
       if (!html5QrCode) {
         // formatsToSupport / experimentalFeatures ต้องใส่ตอนสร้าง (ใส่ใน start() จะถูกมองข้าม)
         // จำกัดเฉพาะชนิดที่ใช้จริง: ยิ่งน้อยยิ่งอ่านเร็ว
