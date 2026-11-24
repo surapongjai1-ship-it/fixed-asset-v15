@@ -587,7 +587,7 @@
           const companies = [...new Set(assets.map(a => a.company))];
           companies.forEach(comp => {
             if (!companyMetadata[comp]) {
-              companyMetadata[comp] = { inspector: "นายสุรพงษ์ ใจตุ้ย", date: "" };
+              companyMetadata[comp] = { inspector: "", date: "" };
             }
           });
 
@@ -626,7 +626,7 @@
 
     function updateCompanyMeta(field, value) {
       if (!companyMetadata[currentCompany]) {
-        companyMetadata[currentCompany] = { inspector: "นายสุรพงษ์ ใจตุ้ย", date: "" };
+        companyMetadata[currentCompany] = { inspector: "", date: "" };
       }
       companyMetadata[currentCompany][field] = value;
       localStorage.setItem('skyai_meta', JSON.stringify(companyMetadata));
@@ -634,9 +634,9 @@
 
     function syncMetaUI() {
       if (!companyMetadata[currentCompany]) {
-        companyMetadata[currentCompany] = { inspector: "นายสุรพงษ์ ใจตุ้ย", date: "" };
+        companyMetadata[currentCompany] = { inspector: "", date: "" };
       }
-      document.getElementById('inspectorName').value = companyMetadata[currentCompany].inspector;
+      document.getElementById("inspectorName").value = companyMetadata[currentCompany].inspector || "";
       document.getElementById("inspectDate").value = companyMetadata[currentCompany].date || "";
       document.getElementById('metaCompLabel1').innerText = currentCompany;
       document.getElementById('metaCompLabel2').innerText = currentCompany;
@@ -925,7 +925,7 @@
         companyMetadata[sanitizedNewName] = { ...companyMetadata[currentCompany] };
         delete companyMetadata[currentCompany];
       } else {
-        companyMetadata[sanitizedNewName] = { inspector: "นายสุรพงษ์ ใจตุ้ย", date: "" };
+        companyMetadata[sanitizedNewName] = { inspector: "", date: "" };
       }
       localStorage.setItem('skyai_meta', JSON.stringify(companyMetadata));
 
@@ -1566,7 +1566,7 @@
 
           if (importedCount > 0) {
             batch.commit().then(() => {
-              companyMetadata[companyName] = { inspector: "นายสุรพงษ์ ใจตุ้ย", date: "" };
+              companyMetadata[companyName] = { inspector: "", date: "" };
               localStorage.setItem('skyai_meta', JSON.stringify(companyMetadata));
               alert(`นำเข้าข้อมูลบริษัท "${companyName}" สำเร็จทั้งหมด ${importedCount} รายการครบถ้วน!`);
               switchCompany(companyName);
@@ -1935,7 +1935,7 @@
     }
 
     function exportToExcelClean() {
-      const meta = companyMetadata[currentCompany] || { inspector: "นายสุรพงษ์ ใจตุ้ย", date: "" };
+      const meta = companyMetadata[currentCompany] || { inspector: "", date: "" };
       const companyAssets = assets.filter(a => a.company === currentCompany);
       const excelData = companyAssets.map((a, i) => ({
         "ลำดับที่": a.id || (i + 1), "บริษัท/องค์กร": a.company,
