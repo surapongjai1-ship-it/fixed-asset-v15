@@ -378,7 +378,11 @@
         <button onclick="closeScannerModal()" aria-label="ปิดกล้อง" class="w-10 h-10 -mr-2 flex items-center justify-center text-slate-500 hover:text-slate-700 text-lg"><i class="fa-solid fa-xmark"></i></button>
       </div>
 
-      <div id="reader" class="w-full mx-auto rounded-lg overflow-hidden bg-slate-900 min-h-[220px]"></div>
+      <!-- touch-action:none = ถ่างนิ้วบนภาพกล้องแล้วซูมกล้อง ไม่ใช่ซูมทั้งหน้าเว็บ -->
+      <div class="relative">
+        <div id="reader" class="w-full mx-auto rounded-lg overflow-hidden bg-slate-900 min-h-[220px]" style="touch-action: none;"></div>
+        <div id="zoomBadge" class="hidden absolute top-2 left-1/2 -translate-x-1/2 bg-black/60 text-white text-sm font-bold px-3 py-1 rounded-full pointer-events-none">1.0x</div>
+      </div>
 
       <!-- Popup เด้งขึ้นมาเมื่อสแกนเจอเลขในระบบ -->
       <div id="scanQuickPopup" class="hidden absolute inset-x-3 top-16 bg-slate-900/95 text-white p-3.5 rounded-xl shadow-2xl space-y-2.5 z-40 border border-slate-700">
@@ -439,11 +443,8 @@
         <input type="checkbox" id="continuousScanToggle" checked class="w-4 h-4 accent-blue-600 cursor-pointer">
       </div>
 
-      <div id="zoomControlRow" class="flex items-center gap-2 px-1">
-        <span class="text-[11px] text-slate-500 font-medium">ซูม:</span>
-        <button onclick="adjustZoom(-0.5)" class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs px-2.5 py-1 rounded font-bold">-</button>
-        <input type="range" id="zoomRange" min="1" max="5" step="0.5" value="2.0" oninput="onZoomChange(this.value)" class="flex-1 accent-blue-600">
-        <button onclick="adjustZoom(0.5)" class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs px-2.5 py-1 rounded font-bold">+</button>
+      <div id="zoomHint" class="hidden text-center text-xs text-slate-500">
+        <i class="fa-solid fa-hand-pointer mr-1"></i> ถ่าง / บีบนิ้วบนภาพเพื่อซูม · <span id="zoomHintValue">1.0x</span>
       </div>
 
       <button onclick="closeScannerModal()" class="w-full bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-medium py-2 rounded-lg">ปิดกล้อง</button>
@@ -1255,7 +1256,6 @@
     // --- HYPER SPEED SCANNER ---
     function openScannerModal() {
       document.getElementById('scannerModal').classList.remove('hidden');
-      document.getElementById('zoomRange').value = 2.0; 
       document.getElementById('scanQuickPopup').classList.add('hidden');
       document.getElementById('scanNotFoundPopup').classList.add('hidden');
       lastScannedRawCode = '';
@@ -1375,8 +1375,8 @@
     // ตั้งโฟกัสอัตโนมัติ + ซูม ตามที่กล้องเครื่องนั้นรองรับจริง
     // (ซูมช่วยให้สแกนจากไกลได้ เพราะกล้องครอปจากเซ็นเซอร์ก่อนไลบรารีย่อภาพ)
     function setupCameraTrack() {
-      const zoomRow = document.getElementById('zoomControlRow');
-      const slider = document.getElementById('zoomRange');
+      const hint = document.getElementById('zoomHint');
+      zoomCaps = null;
       try {
         const videoElement = document.querySelector('#reader video');
         if (!videoElement || !videoElement.srcObject) return;
@@ -1388,21 +1388,76 @@
         }
 
         if (caps.zoom && caps.zoom.max > caps.zoom.min) {
-          const min = caps.zoom.min || 1;
-          const max = Math.min(caps.zoom.max, 5);
-          const start = Math.min(Math.max(2, min), max);
-          slider.min = min;
-          slider.max = max;
-          slider.step = 0.5;
-          slider.value = start;
-          zoomRow.classList.remove('hidden');
-          currentTrack.applyConstraints({ advanced: [{ zoom: start }] }).catch(() => {});
+          zoomCaps = { min: caps.zoom.min || 1, max: Math.min(caps.zoom.max, 5) };
+          // เริ่มที่ค่าซูมล่าสุดที่เครื่องนี้ใช้ ถ้าไม่เคยใช้ เริ่มที่ไม่ซูม
+          let saved = NaN;
+          try { saved = parseFloat(localStorage.getItem('skyai_scan_zoom')); } catch (e) {}
+          setCameraZoom(isNaN(saved) ? zoomCaps.min : saved, false);
+          hint.classList.remove('hidden');
         } else {
-          // เบราว์เซอร์/เครื่องนี้สั่งซูมไม่ได้ (เช่น iPhone หลายรุ่น) ซ่อนแถบเลื่อนไม่ให้เข้าใจผิด
-          zoomRow.classList.add('hidden');
+          // เครื่องนี้สั่งซูมกล้องผ่านเว็บไม่ได้
+          hint.classList.add('hidden');
         }
       } catch (e) {}
     }
+
+    // --- ซูมกล้องด้วยการถ่าง/บีบนิ้ว ---
+    let zoomCaps = null;
+    let currentZoom = 1;
+    let pinchStartDist = 0;
+    let pinchStartZoom = 1;
+    let zoomBadgeTimer = null;
+    let zoomApplyPending = false;
+
+    function setCameraZoom(value, showBadge) {
+      if (!currentTrack || !zoomCaps) return;
+      currentZoom = Math.min(zoomCaps.max, Math.max(zoomCaps.min, value));
+      const label = currentZoom.toFixed(1) + 'x';
+      document.getElementById('zoomHintValue').innerText = label;
+      if (showBadge) {
+        const badge = document.getElementById('zoomBadge');
+        badge.innerText = label;
+        badge.classList.remove('hidden');
+        clearTimeout(zoomBadgeTimer);
+        zoomBadgeTimer = setTimeout(() => badge.classList.add('hidden'), 800);
+      }
+      // ส่งคำสั่งซูมไม่เกินเฟรมละครั้ง ไม่ให้กล้องกระตุก
+      if (zoomApplyPending) return;
+      zoomApplyPending = true;
+      requestAnimationFrame(() => {
+        zoomApplyPending = false;
+        if (currentTrack) currentTrack.applyConstraints({ advanced: [{ zoom: currentZoom }] }).catch(() => {});
+      });
+    }
+
+    function touchDistance(touches) {
+      const dx = touches[0].clientX - touches[1].clientX;
+      const dy = touches[0].clientY - touches[1].clientY;
+      return Math.hypot(dx, dy);
+    }
+
+    (function setupPinchZoom() {
+      const reader = document.getElementById('reader');
+      reader.addEventListener('touchstart', (e) => {
+        if (e.touches.length === 2 && zoomCaps) {
+          pinchStartDist = touchDistance(e.touches);
+          pinchStartZoom = currentZoom;
+          e.preventDefault();
+        }
+      }, { passive: false });
+      reader.addEventListener('touchmove', (e) => {
+        if (e.touches.length === 2 && zoomCaps && pinchStartDist > 0) {
+          setCameraZoom(pinchStartZoom * (touchDistance(e.touches) / pinchStartDist), true);
+          e.preventDefault();
+        }
+      }, { passive: false });
+      reader.addEventListener('touchend', (e) => {
+        if (pinchStartDist > 0 && e.touches.length < 2) {
+          pinchStartDist = 0;
+          try { localStorage.setItem('skyai_scan_zoom', String(currentZoom)); } catch (err) {}
+        }
+      });
+    })();
 
     function promoteScannedCodeToExtra() {
       const codeOnly = String(document.getElementById('notFoundScannedCode').innerText || '').trim();
@@ -1473,25 +1528,6 @@
       }
     }
 
-    function onZoomChange(value) {
-      if (currentTrack) {
-        const capabilities = currentTrack.getCapabilities();
-        if (capabilities && capabilities.zoom) {
-          currentTrack.applyConstraints({ advanced: [{ zoom: parseFloat(value) }] }).catch(err => {});
-        }
-      }
-    }
-
-    function adjustZoom(amount) {
-      const slider = document.getElementById('zoomRange');
-      const minVal = parseFloat(slider.min) || 1;
-      const maxVal = parseFloat(slider.max) || 5;
-      let newVal = parseFloat(slider.value) + amount;
-      if (newVal < minVal) newVal = minVal;
-      if (newVal > maxVal) newVal = maxVal;
-      slider.value = newVal;
-      onZoomChange(newVal);
-    }
 
     function closeScannerModal() {
       currentTrack = null;
