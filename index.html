@@ -977,9 +977,14 @@
                     <div class="text-[10px] text-slate-600 truncate">${item.name || ''}</div>
                     <div class="text-[10px] text-slate-400 truncate">🏢 ${item.company}${(item.images || []).length ? ` · 📸 ${item.images.length} รูป` : ''}</div>
                   </div>
-                  <button onclick="restoreSingleAsset('${item.trashId}')" class="shrink-0 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] px-2.5 py-1 rounded shadow-sm">
-                    <i class="fa-solid fa-rotate-left mr-1"></i> กู้คืน
-                  </button>
+                  <div class="shrink-0 flex gap-1">
+                    <button onclick="restoreSingleAsset('${item.trashId}')" class="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] px-2.5 py-1 rounded shadow-sm">
+                      <i class="fa-solid fa-rotate-left mr-1"></i> กู้คืน
+                    </button>
+                    <button onclick="permanentlyDeleteTrashItem('${item.trashId}')" class="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 text-[11px] px-2.5 py-1 rounded">
+                      <i class="fa-solid fa-trash-can mr-1"></i> ลบถาวร
+                    </button>
+                  </div>
                 </div>
               `).join('')}
             </div>
@@ -994,9 +999,14 @@
                   <span>🏢 บริษัท: ${comp} (${grouped[comp].length} รายการ)</span>
                   <span class="text-[10px] text-violet-600 ml-1.5 font-semibold">📸 มีรูปถ่าย ${totalImgs} รูป</span>
                 </div>
-                <button onclick="restoreCompany('${comp}')" class="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] px-2.5 py-1 rounded shadow-sm">
-                  <i class="fa-solid fa-rotate-left mr-1"></i> กู้คืน Tab นี้
-                </button>
+                <div class="shrink-0 flex gap-1">
+                  <button onclick="restoreCompany('${comp}')" class="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] px-2.5 py-1 rounded shadow-sm">
+                    <i class="fa-solid fa-rotate-left mr-1"></i> กู้คืน Tab นี้
+                  </button>
+                  <button onclick="permanentlyDeleteTrashCompany('${comp}')" class="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 text-[11px] px-2.5 py-1 rounded">
+                    <i class="fa-solid fa-trash-can mr-1"></i> ลบถาวร
+                  </button>
+                </div>
               </div>
             </div>
           `;
@@ -1037,16 +1047,57 @@
       }).catch(err => alert("กู้คืนไม่สำเร็จ: " + err.message));
     }
 
-    function emptyTrash() {
+    // ลบเอกสารในถังขยะทีละชุด (Firestore batch รับได้ไม่เกิน 500 รายการต่อครั้ง)
+    async function deleteTrashDocs(trashIds) {
+      const chunkSize = 400;
+      for (let i = 0; i < trashIds.length; i += chunkSize) {
+        const batch = db.batch();
+        trashIds.slice(i, i + chunkSize).forEach(id => batch.delete(db.collection("skyai_trash_v9").doc(id)));
+        await batch.commit();
+      }
+    }
+
+    async function permanentlyDeleteTrashItem(trashId) {
+      const item = trashAssets.find(t => t.trashId === trashId);
+      if (!item) return;
+      const imgCount = (item.images || []).length;
+      if (!confirm(`⚠️ ลบถาวร: ${item.code}\n${item.name || ''}` +
+        (imgCount > 0 ? `\nรวมรูปถ่าย ${imgCount} รูป` : '') +
+        `\n\nลบแล้วกู้คืนไม่ได้อีก ต้องการลบใช่หรือไม่?`)) return;
+      try {
+        await deleteTrashDocs([trashId]);
+        trashAssets = trashAssets.filter(t => t.trashId !== trashId);
+        openTrashModal();
+      } catch (err) {
+        alert("ลบไม่สำเร็จ: " + err.message);
+      }
+    }
+
+    async function permanentlyDeleteTrashCompany(compName) {
+      const items = trashAssets.filter(t => t.company === compName && t.trashType !== 'item');
+      if (items.length === 0) return;
+      const imgCount = items.reduce((s, i) => s + (i.images ? i.images.length : 0), 0);
+      if (!confirm(`⚠️ ลบถาวร: Tab บริษัท "${compName}"\n${items.length} รายการ, รูปถ่าย ${imgCount} รูป\n\nลบแล้วกู้คืนไม่ได้อีก ต้องการลบใช่หรือไม่?`)) return;
+      try {
+        const ids = items.map(i => i.trashId);
+        await deleteTrashDocs(ids);
+        trashAssets = trashAssets.filter(t => !ids.includes(t.trashId));
+        openTrashModal();
+        alert(`ลบ Tab "${compName}" ออกจากถังขยะถาวรแล้ว`);
+      } catch (err) {
+        alert("ลบไม่สำเร็จ: " + err.message);
+      }
+    }
+
+    async function emptyTrash() {
       if (!confirm("⚠️ คำเตือน: คุณต้องการล้างถังขยะทั้งหมดถาวรใช่หรือไม่?")) return;
-      const batch = db.batch();
-      trashAssets.forEach(item => {
-        batch.delete(db.collection("skyai_trash_v9").doc(item.trashId));
-      });
-      batch.commit().then(() => {
+      try {
+        await deleteTrashDocs(trashAssets.map(item => item.trashId));
         alert("ล้างถังขยะเรียบร้อยแล้ว");
         closeTrashModal();
-      });
+      } catch (err) {
+        alert("ล้างถังขยะไม่สำเร็จ: " + err.message);
+      }
     }
 
     function downloadExcelTemplate() {
