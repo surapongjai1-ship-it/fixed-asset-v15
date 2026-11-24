@@ -289,7 +289,7 @@
   <div id="trashModal" class="fixed inset-0 bg-black/70 z-50 hidden flex items-center justify-center p-4">
     <div class="bg-white rounded-xl max-w-lg w-full p-4 space-y-3 shadow-2xl max-h-[85vh] flex flex-col">
       <div class="flex justify-between items-center border-b pb-2">
-        <h3 class="font-bold text-xs text-slate-800"><i class="fa-solid fa-folder-minus mr-1 text-amber-600"></i> ถังขยะ Tab บริษัท</h3>
+        <h3 class="font-bold text-xs text-slate-800"><i class="fa-solid fa-folder-minus mr-1 text-amber-600"></i> ถังขยะ (Tab บริษัท และรายการที่ลบ)</h3>
         <button onclick="closeTrashModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
       </div>
       <div id="trashListContainer" class="flex-1 overflow-y-auto space-y-2 max-h-[350px]"></div>
@@ -913,18 +913,78 @@
       });
     }
 
+    // --- ลบทีละรายการ: ย้ายไปถังขยะ (กู้คืนได้) ไม่ได้ลบถาวร ---
+    function deleteSingleAsset(docId) {
+      const item = assets.find(a => a.docId === docId);
+      if (!item) return;
+      const imgCount = (item.images || []).length;
+      const msg = `ต้องการลบรายการนี้ใช่หรือไม่?\n\n${item.code}\n${item.name || ''}` +
+        (imgCount > 0 ? `\n(มีรูปถ่าย ${imgCount} รูป จะย้ายไปด้วย)` : '') +
+        `\n\nรายการจะถูกย้ายไปถังขยะ กู้คืนได้ภายหลัง`;
+      if (!confirm(msg)) return;
+
+      const batch = db.batch();
+      const trashRef = db.collection("skyai_trash_v9").doc();
+      const data = { ...item };
+      delete data.docId;
+      batch.set(trashRef, { ...data, originalDocId: docId, deletedAt: new Date().toISOString(), trashType: 'item' });
+      batch.delete(db.collection("skyai_assets_v9_clean").doc(docId));
+      batch.commit().catch(err => alert("ลบไม่สำเร็จ: " + err.message));
+    }
+
+    function restoreSingleAsset(trashId) {
+      const item = trashAssets.find(t => t.trashId === trashId);
+      if (!item) return;
+      const docId = item.originalDocId || `asset_${item.company}_${item.id}_${Date.now()}`;
+      const data = { ...item };
+      delete data.trashId;
+      delete data.originalDocId;
+      delete data.deletedAt;
+      delete data.trashType;
+      delete data.docId;
+
+      const batch = db.batch();
+      batch.set(db.collection("skyai_assets_v9_clean").doc(docId), data);
+      batch.delete(db.collection("skyai_trash_v9").doc(trashId));
+      batch.commit().then(() => {
+        alert(`กู้คืนรายการ ${item.code} เรียบร้อยแล้ว`);
+        openTrashModal();
+      }).catch(err => alert("กู้คืนไม่สำเร็จ: " + err.message));
+    }
+
     function openTrashModal() {
       const container = document.getElementById('trashListContainer');
       if (trashAssets.length === 0) {
         container.innerHTML = `<div class="text-center text-slate-400 text-xs py-8">ถังขยะ Tab ว่างเปล่า</div>`;
       } else {
+        const singleItems = trashAssets.filter(item => item.trashType === 'item');
         const grouped = {};
-        trashAssets.forEach(item => {
+        trashAssets.filter(item => item.trashType !== 'item').forEach(item => {
           if (!grouped[item.company]) grouped[item.company] = [];
           grouped[item.company].push(item);
         });
 
         let html = '';
+        if (singleItems.length > 0) {
+          const sorted = [...singleItems].sort((a, b) => String(b.deletedAt || '').localeCompare(String(a.deletedAt || '')));
+          html += `
+            <div class="bg-red-50/40 border border-red-200 rounded-lg p-3 space-y-2">
+              <div class="text-xs font-bold text-slate-700">🗂️ รายการที่ลบทีละรายการ (${singleItems.length})</div>
+              ${sorted.map(item => `
+                <div class="flex items-center justify-between gap-2 bg-white border border-slate-200 rounded p-2">
+                  <div class="min-w-0">
+                    <div class="text-[11px] font-mono font-bold text-blue-600 truncate">${item.code}</div>
+                    <div class="text-[10px] text-slate-600 truncate">${item.name || ''}</div>
+                    <div class="text-[10px] text-slate-400 truncate">🏢 ${item.company}${(item.images || []).length ? ` · 📸 ${item.images.length} รูป` : ''}</div>
+                  </div>
+                  <button onclick="restoreSingleAsset('${item.trashId}')" class="shrink-0 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] px-2.5 py-1 rounded shadow-sm">
+                    <i class="fa-solid fa-rotate-left mr-1"></i> กู้คืน
+                  </button>
+                </div>
+              `).join('')}
+            </div>
+          `;
+        }
         for (let comp in grouped) {
           const totalImgs = grouped[comp].reduce((sum, i) => sum + (i.images ? i.images.length : 0), 0);
           html += `
@@ -952,7 +1012,8 @@
 
     function restoreCompany(compName) {
       if (!confirm(`ต้องการกู้คืนข้อมูลบริษัท "${compName}" พร้อมรูปถ่ายทั้งหมดกลับมาใช่หรือไม่?`)) return;
-      const itemsToRestore = trashAssets.filter(item => item.company === compName);
+      // กู้คืนเฉพาะที่ถูกลบมาทั้ง Tab ส่วนรายการที่ลบทีละรายการ กู้คืนแยกเอง
+      const itemsToRestore = trashAssets.filter(item => item.company === compName && item.trashType !== 'item');
       const batch = db.batch();
 
       itemsToRestore.forEach(item => {
@@ -1650,6 +1711,9 @@
             </label>
             ${imgCount > 0 ? `<button onclick="openGallery('${item.docId}')" class="bg-blue-50 hover:bg-blue-100 text-blue-700 text-[11px] font-medium px-2.5 py-1.5 rounded flex items-center gap-1 transition-all"><i class="fa-solid fa-images"></i> รูปภาพ (${imgCount})</button>` : '<span class="text-[10px] text-slate-400">ยังไม่มีรูป</span>'}
             <input type="text" value="${item.remark || ''}" onchange="setRemark('${item.docId}', this.value)" placeholder="หมายเหตุ..." class="flex-1 min-w-[130px] bg-slate-50 border border-slate-200 rounded px-2 py-1 text-[11px] text-slate-700 focus:outline-none">
+            <button onclick="deleteSingleAsset('${item.docId}')" title="ลบรายการนี้ (ย้ายไปถังขยะ)" aria-label="ลบรายการนี้" class="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 text-[11px] font-medium px-2.5 py-1.5 rounded flex items-center gap-1 transition-all">
+              <i class="fa-solid fa-trash-can"></i> ลบ
+            </button>
           </div>
         </div>
       `}).join('');
