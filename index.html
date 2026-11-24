@@ -16,7 +16,7 @@
   <!-- Chart.js for Dashboard -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <!-- Html5-Qrcode Scanner -->
-  <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js" type="text/javascript"></script>
 
   <!-- Firebase SDK -->
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
@@ -28,12 +28,14 @@
     .status-btn.active-ดี { background-color: #059669; color: white; border-color: #059669; }
     .status-btn.active-ชำรุด { background-color: #d97706; color: white; border-color: #d97706; }
     .status-btn.active-สูญหาย { background-color: #dc2626; color: white; border-color: #dc2626; }
+    /* กล่องค้นหาติดใต้แถบหัวพอดี: --header-h ถูกอัปเดตจากความสูงแถบหัวจริง (แถบหัวสูงขึ้นเมื่อปุ่มตัดบรรทัด) */
+    #stickySearchBar { top: calc(var(--header-h, 56px) + 8px); }
   </style>
 </head>
 <body class="pb-28">
 
   <!-- Minimal Clean Header -->
-  <header class="bg-slate-900 text-white shadow-md sticky top-0 z-30 px-4 py-3">
+  <header id="appHeader" class="bg-slate-900 text-white shadow-md sticky top-0 z-30 px-4 py-3">
     <div class="max-w-4xl mx-auto flex items-center justify-between">
       <div class="flex items-center space-x-2.5">
         <div class="bg-blue-600 text-white p-2 rounded-lg flex items-center justify-center">
@@ -133,7 +135,7 @@
     </div>
 
     <!-- Search, Location Filter, Add Extra & Scanner Bar -->
-    <div class="bg-white rounded-xl p-3 shadow-sm border border-slate-200 space-y-2.5 sticky top-14 z-20">
+    <div id="stickySearchBar" class="bg-white rounded-xl p-3 shadow-sm border border-slate-200 space-y-2.5 sticky z-20">
       <div class="flex gap-2 items-center flex-wrap sm:flex-nowrap">
         <!-- ช่องค้นหาเลขทะเบียน / ชื่อ -->
         <div class="relative flex-1 min-w-[180px]">
@@ -382,7 +384,7 @@
         <input type="checkbox" id="continuousScanToggle" checked class="w-4 h-4 accent-blue-600 cursor-pointer">
       </div>
 
-      <div class="flex items-center gap-2 px-1">
+      <div id="zoomControlRow" class="flex items-center gap-2 px-1">
         <span class="text-[11px] text-slate-500 font-medium">ซูม:</span>
         <button onclick="adjustZoom(-0.5)" class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs px-2.5 py-1 rounded font-bold">-</button>
         <input type="range" id="zoomRange" min="1" max="5" step="0.5" value="2.0" oninput="onZoomChange(this.value)" class="flex-1 accent-blue-600">
@@ -443,6 +445,18 @@
     let currentTrack = null;
     let companyMetadata = {};
     let scannedTargetDocId = null;
+
+    // วัดความสูงแถบหัวจริงทุกครั้งที่เปลี่ยน (หมุนจอ, ปุ่มตัดบรรทัด, ฟอนต์โหลดเสร็จ)
+    function syncHeaderHeight() {
+      const header = document.getElementById('appHeader');
+      if (header) document.documentElement.style.setProperty('--header-h', header.offsetHeight + 'px');
+    }
+    syncHeaderHeight();
+    if (window.ResizeObserver) {
+      new ResizeObserver(syncHeaderHeight).observe(document.getElementById('appHeader'));
+    } else {
+      window.addEventListener('resize', syncHeaderHeight);
+    }
 
     window.onload = function() {
       initChart();
@@ -1023,23 +1037,37 @@
       lastScanTimestamp = 0;
       
       if (!html5QrCode) {
-        html5QrCode = new Html5Qrcode("reader");
+        // formatsToSupport / experimentalFeatures ต้องใส่ตอนสร้าง (ใส่ใน start() จะถูกมองข้าม)
+        // จำกัดเฉพาะชนิดที่ใช้จริง: ยิ่งน้อยยิ่งอ่านเร็ว
+        html5QrCode = new Html5Qrcode("reader", {
+          formatsToSupport: [
+            Html5QrcodeSupportedFormats.QR_CODE,
+            Html5QrcodeSupportedFormats.CODE_128,
+            Html5QrcodeSupportedFormats.CODE_39
+          ],
+          experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+          verbose: false
+        });
       }
 
       const isContinuous = document.getElementById('continuousScanToggle').checked;
 
-      const qrConfig = { 
-        fps: 60, 
-        qrbox: { width: 320, height: 320 },
-        aspectRatio: 1.0,
-        experimentalFeatures: {
-          useBarCodeDetectorIfSupported: true
+      const qrConfig = {
+        // ตัวอ่านทำได้จริงราว 10-15 ภาพ/วินาที ตั้งสูงกว่านี้มีแต่ทำให้เครื่องหน่วง
+        fps: 15,
+        // ไลบรารีย่อภาพเหลือขนาดกรอบนี้ (หน่วย px บนจอ) ก่อนอ่าน กรอบใหญ่ = อ่านได้จากไกลขึ้น
+        // เป็นสี่เหลี่ยมผืนผ้าเพื่อให้รองรับทั้ง QR และบาร์โค้ดเส้น
+        qrbox: (viewW, viewH) => {
+          const w = Math.max(50, Math.floor(viewW * 0.9));
+          const h = Math.max(50, Math.floor(Math.min(viewH * 0.9, w * 0.75)));
+          return { width: w, height: h };
         },
+        // ไม่ต้องลองอ่านภาพกลับด้านซ้ำทุกเฟรม (ป้ายจริงไม่กลับด้าน) ลดงานลงครึ่งหนึ่ง
+        disableFlip: true,
         videoConstraints: {
           facingMode: "environment",
-          focusMode: "continuous",
-          width: { ideal: 1920 },
-          height: { ideal: 1080 }
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
         }
       };
 
@@ -1109,14 +1137,40 @@
         },
         (errorMessage) => {}
       ).then(() => {
-        try {
-          const videoElement = document.querySelector('#reader video');
-          if (videoElement && videoElement.srcObject) {
-            currentTrack = videoElement.srcObject.getVideoTracks()[0];
-            currentTrack.applyConstraints({ advanced: [{ zoom: 2.0 }] }).catch(err => {});
-          }
-        } catch (e) {}
+        setupCameraTrack();
       }).catch(err => alert("ไม่สามารถเปิดกล้องได้: " + err));
+    }
+
+    // ตั้งโฟกัสอัตโนมัติ + ซูม ตามที่กล้องเครื่องนั้นรองรับจริง
+    // (ซูมช่วยให้สแกนจากไกลได้ เพราะกล้องครอปจากเซ็นเซอร์ก่อนไลบรารีย่อภาพ)
+    function setupCameraTrack() {
+      const zoomRow = document.getElementById('zoomControlRow');
+      const slider = document.getElementById('zoomRange');
+      try {
+        const videoElement = document.querySelector('#reader video');
+        if (!videoElement || !videoElement.srcObject) return;
+        currentTrack = videoElement.srcObject.getVideoTracks()[0];
+        const caps = (currentTrack.getCapabilities && currentTrack.getCapabilities()) || {};
+
+        if (Array.isArray(caps.focusMode) && caps.focusMode.includes('continuous')) {
+          currentTrack.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(() => {});
+        }
+
+        if (caps.zoom && caps.zoom.max > caps.zoom.min) {
+          const min = caps.zoom.min || 1;
+          const max = Math.min(caps.zoom.max, 5);
+          const start = Math.min(Math.max(2, min), max);
+          slider.min = min;
+          slider.max = max;
+          slider.step = 0.5;
+          slider.value = start;
+          zoomRow.classList.remove('hidden');
+          currentTrack.applyConstraints({ advanced: [{ zoom: start }] }).catch(() => {});
+        } else {
+          // เบราว์เซอร์/เครื่องนี้สั่งซูมไม่ได้ (เช่น iPhone หลายรุ่น) ซ่อนแถบเลื่อนไม่ให้เข้าใจผิด
+          zoomRow.classList.add('hidden');
+        }
+      } catch (e) {}
     }
 
     function promoteScannedCodeToExtra() {
@@ -1199,8 +1253,11 @@
 
     function adjustZoom(amount) {
       const slider = document.getElementById('zoomRange');
+      const minVal = parseFloat(slider.min) || 1;
+      const maxVal = parseFloat(slider.max) || 5;
       let newVal = parseFloat(slider.value) + amount;
-      if (newVal < 1) newVal = 1; if (newVal > 5) newVal = 5;
+      if (newVal < minVal) newVal = minVal;
+      if (newVal > maxVal) newVal = maxVal;
       slider.value = newVal;
       onZoomChange(newVal);
     }
