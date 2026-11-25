@@ -1081,19 +1081,51 @@
         return;
       }
 
-      container.innerHTML = filteredLocations.map(loc => {
-        const count = companyAssets.filter(a => (a.location || '-') === loc).length;
-        const isChecked = selectedLocations.includes(loc);
-        return `
-          <label class="flex items-center justify-between hover:bg-slate-50 p-1 rounded cursor-pointer">
+      const countOf = (loc) => companyAssets.filter(a => (a.location || '-') === loc).length;
+      const locRow = (loc, indent) => `
+          <label class="flex items-center justify-between hover:bg-slate-50 p-1 rounded cursor-pointer ${indent ? 'ml-5' : ''}">
             <div class="flex items-center gap-2 truncate">
-              <input type="checkbox" value="${esc(loc)}" ${isChecked ? 'checked' : ''} onchange="onLocationCheckboxChange()" class="location-chk rounded text-blue-600 focus:ring-0">
+              <input type="checkbox" value="${esc(loc)}" ${selectedLocations.includes(loc) ? 'checked' : ''} onchange="onLocationCheckboxChange()" class="location-chk rounded text-blue-600 focus:ring-0">
               <span class="truncate text-slate-700" title="${esc(loc)}">${esc(loc)}</span>
             </div>
-            <span class="text-[10px] text-slate-400 font-mono">(${count})</span>
-          </label>
-        `;
+            <span class="text-[10px] text-slate-400 font-mono">(${countOf(loc)})</span>
+          </label>`;
+
+      // จัดกลุ่มตามรหัสชั้น: ติ๊กชื่อชั้น = เลือกทุกห้องในชั้นนั้น (เฉพาะที่ตรงกับ Keyword)
+      const order = [], byFloor = {};
+      filteredLocations.forEach(loc => {
+        const fk = floorKeyOf(loc);
+        const key = fk ? 'F:' + fk : 'L:' + loc;
+        if (!byFloor[key]) { byFloor[key] = { fk, locs: [] }; order.push(key); }
+        byFloor[key].locs.push(loc);
+      });
+      order.sort((a, b) => String(byFloor[a].fk || byFloor[a].locs[0]).localeCompare(String(byFloor[b].fk || byFloor[b].locs[0]), 'th', { numeric: true }));
+
+      container.innerHTML = order.map(key => {
+        const g = byFloor[key];
+        if (!g.fk || g.locs.length === 1) return g.locs.map(loc => locRow(loc, false)).join('');
+        const nSel = g.locs.filter(l => selectedLocations.includes(l)).length;
+        const total = g.locs.reduce((s, l) => s + countOf(l), 0);
+        return `
+          <label class="flex items-center justify-between hover:bg-slate-50 p-1 rounded cursor-pointer font-bold">
+            <div class="flex items-center gap-2 truncate">
+              <input type="checkbox" ${nSel === g.locs.length ? 'checked' : ''} data-partial="${nSel > 0 && nSel < g.locs.length ? 1 : ''}"
+                onchange="selectFloorLocations(${esc(JSON.stringify(g.locs))}, this.checked)" class="floor-chk rounded text-blue-600 focus:ring-0">
+              <span class="truncate text-slate-800">${esc(g.fk)} <span class="font-normal text-slate-400">(${g.locs.length} ที่)</span></span>
+            </div>
+            <span class="text-[10px] text-slate-400 font-mono">(${total})</span>
+          </label>` + g.locs.map(loc => locRow(loc, true)).join('');
       }).join('');
+      container.querySelectorAll('.floor-chk[data-partial="1"]').forEach(c => { c.indeterminate = true; });
+    }
+
+    function selectFloorLocations(locs, checked) {
+      if (checked) locs.forEach(l => { if (!selectedLocations.includes(l)) selectedLocations.push(l); });
+      else selectedLocations = selectedLocations.filter(l => !locs.includes(l));
+      syncLocationFilterLabel();
+      refreshLocationCheckboxesKeepScroll();
+      currentPage = 1;
+      renderList();
     }
 
     function onPhotoOnlyChange(checked) {
@@ -1114,8 +1146,16 @@
       });
 
       syncLocationFilterLabel();
+      refreshLocationCheckboxesKeepScroll(); // อัปเดตช่องติ๊กของชั้นให้ตรงกับห้องที่เลือก
       currentPage = 1;
       renderList();
+    }
+
+    function refreshLocationCheckboxesKeepScroll() {
+      const box = document.getElementById('locationCheckboxesContainer');
+      const top = box.scrollTop;
+      renderLocationCheckboxes();
+      box.scrollTop = top;
     }
 
     function selectMatchingLocations(shouldSelect) {
@@ -1145,6 +1185,8 @@
         label.innerText = '📸 มีรูป';
       } else if (nActive === 1) {
         label.innerText = selectedLocations[0];
+      } else if (!onlyWithPhotos && selectedLocations.every(l => floorKeyOf(l) && floorKeyOf(l) === floorKeyOf(selectedLocations[0]))) {
+        label.innerText = `${floorKeyOf(selectedLocations[0])} (${selectedLocations.length} ที่)`;
       } else {
         label.innerText = `กรอง ${nActive} อย่าง`;
       }
@@ -2121,44 +2163,94 @@
       renderLocProgress();
     }
 
-    function renderLocProgress(companyAssets) {
-      companyAssets = companyAssets || assets.filter(a => a.company === currentCompany);
-      const groups = {};
+    // รหัสตึก/ชั้นจากคำแรกของชื่อสถานที่ เช่น "T1F6 ห้องประชุม" → "T1F6", "T2B1" → "T2B1", "T2 ลานจอด" → "T2"
+    // ถ้าคำแรกไม่ใช่รหัส (เช่น "คลังลาดพร้าว") ให้ถือว่าเป็นกลุ่มของตัวเอง
+    function floorKeyOf(loc) {
+      const first = String(loc || '').trim().split(/\s+/)[0];
+      return /^T\d+([FB]\d+)?$/i.test(first) ? first.toUpperCase() : null;
+    }
+
+    // จัดกลุ่มสถานที่ตามรหัสชั้น → [{ key, isFloor, locs: [{loc,total,done}], total, done }]
+    function groupLocations(companyAssets) {
+      const perLoc = {};
       companyAssets.forEach(a => {
         const loc = a.location || '-';
-        const g = groups[loc] || (groups[loc] = { loc, total: 0, done: 0 });
-        g.total++;
-        if (a.status) g.done++;
+        const s = perLoc[loc] || (perLoc[loc] = { loc, total: 0, done: 0 });
+        s.total++;
+        if (a.status) s.done++;
       });
-      const list = Object.values(groups).sort((a, b) =>
+      const groups = {};
+      Object.values(perLoc).forEach(s => {
+        const fk = floorKeyOf(s.loc);
+        const key = fk || s.loc;
+        const g = groups[key] || (groups[key] = { key, isFloor: !!fk, locs: [], total: 0, done: 0 });
+        g.locs.push(s); g.total += s.total; g.done += s.done;
+      });
+      const byProgress = (a, b, name) =>
         ((a.done === a.total) - (b.done === b.total)) ||   // ยังไม่ครบขึ้นก่อน
-        ((b.total - b.done) - (a.total - a.done)) ||       // เหลือเยอะขึ้นก่อน
-        String(a.loc).localeCompare(String(b.loc), 'th'));
-      const complete = list.filter(g => g.done === g.total).length;
-      document.getElementById('locProgressSummary').innerText = list.length ? `ครบ ${complete}/${list.length} ที่` : '';
-      if (!locProgressOpen) return;
+        String(name(a)).localeCompare(String(name(b)), 'th', { numeric: true });
+      const list = Object.values(groups);
+      list.forEach(g => g.locs.sort((a, b) => byProgress(a, b, x => x.loc)));
+      return list.sort((a, b) => byProgress(a, b, x => x.key));
+    }
 
-      const box = document.getElementById('locProgressList');
-      if (!list.length) { box.innerHTML = `<div class="text-center text-slate-400 text-[11px] py-2">ยังไม่มีรายการ</div>`; return; }
-      box.innerHTML = list.map(g => {
-        const pct = Math.round(g.done / g.total * 100);
-        const full = g.done === g.total;
-        return `
-          <button onclick="focusLocation(${js(g.loc)})" class="w-full text-left px-2 py-1.5 rounded-lg hover:bg-slate-50 ${selectedLocations.length === 1 && selectedLocations[0] === g.loc ? 'bg-blue-50' : ''}">
+    const expandedFloors = new Set();
+    function toggleFloor(key) {
+      if (expandedFloors.has(key)) expandedFloors.delete(key); else expandedFloors.add(key);
+      renderLocProgress();
+    }
+
+    function sameSet(a, b) { return a.length === b.length && a.every(x => b.includes(x)); }
+
+    function progressRow(label, done, total, onclick, selected, indent) {
+      const pct = total ? Math.round(done / total * 100) : 0;
+      const full = done === total;
+      return `
+          <button onclick="${onclick}" class="flex-1 min-w-0 text-left px-2 py-1.5 rounded-lg hover:bg-slate-50 ${selected ? 'bg-blue-50' : ''} ${indent ? 'ml-5' : ''}">
             <div class="flex justify-between items-center gap-2 text-[11px]">
-              <span class="truncate ${full ? 'text-slate-400' : 'text-slate-700 font-medium'}">${esc(g.loc)}</span>
-              <span class="shrink-0 font-mono ${full ? 'text-emerald-600' : 'text-slate-500'}">${full ? '✓ ' : ''}${g.done}/${g.total}</span>
+              <span class="truncate ${full ? 'text-slate-400' : 'text-slate-700'} ${indent ? '' : 'font-bold'}">${esc(label)}</span>
+              <span class="shrink-0 font-mono ${full ? 'text-emerald-600' : 'text-slate-500'}">${full ? '✓ ' : ''}${done}/${total}</span>
             </div>
             <div class="h-1.5 bg-slate-100 rounded-full overflow-hidden mt-1">
               <div class="h-full ${full ? 'bg-emerald-500' : 'bg-blue-500'}" style="width:${pct}%"></div>
             </div>
           </button>`;
+    }
+
+    function renderLocProgress(companyAssets) {
+      companyAssets = companyAssets || assets.filter(a => a.company === currentCompany);
+      const list = groupLocations(companyAssets);
+      const complete = list.filter(g => g.done === g.total).length;
+      document.getElementById('locProgressSummary').innerText = list.length ? `ครบ ${complete}/${list.length}` : '';
+      if (!locProgressOpen) return;
+
+      const box = document.getElementById('locProgressList');
+      if (!list.length) { box.innerHTML = `<div class="text-center text-slate-400 text-[11px] py-2">ยังไม่มีรายการ</div>`; return; }
+      box.innerHTML = list.map(g => {
+        const locNames = g.locs.map(s => s.loc);
+        const multi = g.isFloor && g.locs.length > 1;
+        if (!multi) {
+          const s = g.locs[0];
+          return `<div class="flex items-center"><span class="w-5 shrink-0"></span>${progressRow(s.loc, s.done, s.total,
+            `focusLocations(${esc(JSON.stringify([s.loc]))})`, sameSet(selectedLocations, [s.loc]), false)}</div>`;
+        }
+        const open = expandedFloors.has(g.key);
+        let html = `<div class="flex items-center">
+            <button onclick="toggleFloor(${js(g.key)})" class="w-5 shrink-0 text-slate-400 hover:text-slate-700 py-2" aria-label="กาง/พับ ${esc(g.key)}">
+              <i class="fa-solid fa-chevron-${open ? 'down' : 'right'} text-[10px]"></i>
+            </button>${progressRow(`${g.key} (${g.locs.length} ที่)`, g.done, g.total,
+            `focusLocations(${esc(JSON.stringify(locNames))})`, sameSet(selectedLocations, locNames), false)}</div>`;
+        if (open) {
+          html += g.locs.map(s => `<div class="flex items-center">${progressRow(s.loc, s.done, s.total,
+            `focusLocations(${esc(JSON.stringify([s.loc]))})`, sameSet(selectedLocations, [s.loc]), true)}</div>`).join('');
+        }
+        return html;
       }).join('');
     }
 
-    // กดสถานที่ในรายการความคืบหน้า → กรองรายการเฉพาะที่นั้น แล้วเลื่อนลงไปที่รายการ
-    function focusLocation(loc) {
-      selectedLocations = [loc];
+    // กดชั้นหรือห้องในรายการความคืบหน้า → กรองรายการเฉพาะที่นั้น แล้วเลื่อนลงไปที่รายการ
+    function focusLocations(locs) {
+      selectedLocations = [...locs];
       syncLocationFilterLabel();
       renderLocationCheckboxes();
       currentPage = 1;
