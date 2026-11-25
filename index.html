@@ -984,7 +984,7 @@
     function historyText(h) {
       if (h.f === 'add') return `เพิ่มรายการนอกสุ่ม${h.to ? ` (สภาพ: ${h.to})` : ''}`;
       const v = (x) => x || (h.f === 'status' ? 'ยังไม่ตรวจ' : '-');
-      return `${HISTORY_FIELD_LABEL[h.f] || h.f}: ${v(h.from)} → ${v(h.to)}`;
+      return `${HISTORY_FIELD_LABEL[h.f] || h.f}: ${v(h.from)} → ${v(h.to)}${h.photo ? ' (ถ่ายรูปยืนยัน)' : ''}`;
     }
     // วันที่สำหรับจัดกลุ่ม: วันนี้ / เมื่อวาน / วันที่
     function historyDayLabel(iso) {
@@ -3283,30 +3283,71 @@
         const row = (a, isDone) => {
           const h = isDone ? tagFixEntry(a) : null;
           return `
-            <div class="flex items-center gap-2 px-3 py-2 border-t border-slate-100 ${isDone ? 'bg-emerald-50/50' : ''}">
+            <div id="tagrow-${esc(a.docId)}" class="flex items-center gap-2 px-3 py-2 border-t border-slate-100 ${isDone ? 'bg-emerald-50/50' : ''}">
               <div class="min-w-0 flex-1">
                 <div class="text-sm ${isDone ? 'text-slate-500' : 'text-slate-800'} truncate"><span class="font-mono text-xs text-slate-500">#${esc(a.id || '-')}</span> ${esc(a.name || '')}</div>
                 <div class="text-[11px] text-slate-500 truncate"><span class="font-mono text-blue-700">${esc(a.code)}</span> · 📍 ${esc(a.location || '-')}${isDone ? '' : ` · <span class="${a.tag === 'ป้ายชำรุด' ? 'text-amber-600' : 'text-red-600'}">${esc(a.tag)}</span>`}</div>
-                ${isDone && h ? `<div class="text-[11px] text-emerald-700">✓ ติดแล้ว · ${esc(h.by)} · ${esc(when(h.at))}</div>` : ''}
+                ${isDone && h ? `<div class="text-[11px] text-emerald-700">✓ ติดแล้ว · ${esc(h.by)} · ${esc(when(h.at))}${imgCountOf(a) ? ` · <button onclick="openGallery(${js(a.docId)})" class="underline">📸 ดูรูป</button>` : ''}</div>` : ''}
               </div>
               ${isDone
                 ? `<button onclick="undoTagDone(${js(a.docId)})" class="shrink-0 text-xs text-slate-500 hover:text-red-600 border border-slate-200 rounded-lg px-2.5 py-2">ยกเลิก</button>`
-                : `<button onclick="markTagDone(${js(a.docId)})" class="shrink-0 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg px-3 py-2"><i class="fa-solid fa-check mr-1"></i>ติดแล้ว</button>`}
+                : `<button onclick="markTagDone(${js(a.docId)})" class="shrink-0 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg px-3 py-2 leading-tight"><i class="fa-solid fa-camera mr-1"></i>ถ่ายรูป<span class="block text-[10px] font-normal opacity-90">· ติดแล้ว</span></button>`}
             </div>`;
         };
         return `<div class="border-b border-slate-100">${head}${g.todo.sort(byId).map(a => row(a, false)).join('')}${g.done.sort(byId).map(a => row(a, true)).join('')}</div>`;
       }).join('');
     }
 
-    // ติดป้ายแล้ว → สถานะป้าย "มีป้าย" + ประวัติ (ใคร เมื่อไหร่)
-    async function markTagDone(docId, silent) {
+    // ย่อรูปแบบเดียวกับการถ่ายรูปในการ์ด (ด้านยาวสุด 700px, JPEG 0.65)
+    function compressPhoto(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error('อ่านรูปไม่ได้'));
+        reader.onload = (e) => {
+          const img = new Image();
+          img.onerror = () => reject(new Error('เปิดรูปไม่ได้'));
+          img.onload = () => {
+            let w = img.width, h = img.height;
+            const MAX_DIM = 700;
+            if (w > h && w > MAX_DIM) { h *= MAX_DIM / w; w = MAX_DIM; } else if (h > MAX_DIM) { w *= MAX_DIM / h; h = MAX_DIM; }
+            const c = document.createElement('canvas'); c.width = w; c.height = h;
+            c.getContext('2d').drawImage(img, 0, 0, w, h);
+            resolve(c.toDataURL('image/jpeg', 0.65));
+          };
+          img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+
+    // ติดป้ายแล้ว → ต้องถ่ายรูปป้ายที่ติดก่อน (เปิดกล้อง) แล้วจึงบันทึก
+    let tagPhotoDocId = null;
+    function markTagDone(docId) {
       const a = assets.find(x => x.docId === docId);
-      if (!a || !TAG_BAD.includes(a.tag)) return false;
-      const name = await ensureInspectorName();
-      db.collection(ASSETS_COL).doc(docId).update({ tag: 'มีป้าย', history: addHistory(historyEntry('tag', a.tag, 'มีป้าย', name)) })
-        .catch(err => alert("บันทึกไม่สำเร็จ: " + err.message));
-      if (!silent) showToast(savedMsg(`ติดป้าย #${a.id || ''} `));
-      return true;
+      if (!a || !TAG_BAD.includes(a.tag)) return;
+      tagPhotoDocId = docId;
+      const input = document.getElementById('tagPhotoInput');
+      input.value = '';
+      input.click();   // ต้องเกิดจากการกดปุ่มของผู้ใช้ (เบราว์เซอร์บังคับ)
+    }
+    async function onTagPhoto(event) {
+      const file = event.target.files && event.target.files[0];
+      const docId = tagPhotoDocId; tagPhotoDocId = null;
+      event.target.value = '';
+      if (!file || !docId) return;              // ยกเลิกการถ่ายรูป = ยังไม่บันทึก
+      const a = assets.find(x => x.docId === docId);
+      if (!a || !TAG_BAD.includes(a.tag)) return;
+      try {
+        const name = await ensureInspectorName();
+        const dataUrl = await compressPhoto(file);
+        addImagesToAsset(a, [dataUrl]).catch(err => alert("บันทึกรูปไม่สำเร็จ: " + err.message));
+        const entry = { ...historyEntry('tag', a.tag, 'มีป้าย', name), photo: true };
+        db.collection(ASSETS_COL).doc(docId).update({ tag: 'มีป้าย', history: addHistory(entry) })
+          .catch(err => alert("บันทึกไม่สำเร็จ: " + err.message));
+        showToast(savedMsg(`ติดป้าย #${a.id || ''} + รูป `));
+      } catch (err) {
+        alert('ถ่ายรูปไม่สำเร็จ: ' + err.message);
+      }
     }
     async function undoTagDone(docId) {
       const a = assets.find(x => x.docId === docId);
@@ -3327,9 +3368,19 @@
     }
     function handleTagScan(found, cleanCode) {
       if (!found) { showToast(`ไม่พบเลข ${cleanCode} ในระบบ`); return; }
-      if (TAG_BAD.includes(found.tag) && found.company === currentCompany) { markTagDone(found.docId, true); showToast(`✓ ติดป้ายแล้ว #${found.id || ''} ${found.code}`); return; }
-      if (found.tag === 'มีป้าย') { showToast(`#${found.id || ''} ${found.code} มีป้ายอยู่แล้ว`); return; }
-      showToast(`${found.code} อยู่ใน Tab "${found.company}" — เปิด Tab นั้นก่อน`);
+      if (found.company !== currentCompany) { showToast(`${found.code} อยู่ใน Tab "${found.company}" — เปิด Tab นั้นก่อน`); return; }
+      if (!TAG_BAD.includes(found.tag)) { showToast(`#${found.id || ''} ${found.code} มีป้ายอยู่แล้ว`); return; }
+      // เจอรายการที่ต้องติด → ปิดกล้อง กลับหน้างานติดป้าย ไปที่รายการนั้น ให้กด "ถ่ายรูป · ติดแล้ว"
+      tagScanMode = false;
+      closeScannerModal();
+      document.getElementById('tagJob').classList.remove('hidden');
+      tagJobOpenFloors.add(floorKeyOf(found.location) || 'อื่นๆ');
+      renderTagJob();
+      setTimeout(() => {
+        const row = document.getElementById('tagrow-' + found.docId);
+        if (row) { row.scrollIntoView({ block: 'center', behavior: 'smooth' }); row.classList.add('ring-2', 'ring-blue-400'); setTimeout(() => row.classList.remove('ring-2', 'ring-blue-400'), 2500); }
+      }, 50);
+      showToast(`เจอ #${found.id || ''} ${found.code} — กด "ถ่ายรูป · ติดแล้ว"`);
     }
 
     // ===================== ส่งออก: เลือก Tab + รูปแบบ (PDF / Excel) =====================
@@ -3789,7 +3840,8 @@
           <button onclick="closeTagJob()" aria-label="ปิด" class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm px-3 py-2 rounded-lg"><i class="fa-solid fa-xmark"></i></button>
         </div>
         <div id="tagJobProgress"></div>
-        <div class="text-[11px] text-slate-500">กดชั้นเพื่อดูรายการ · ติดเสร็จกด <b>✓ ติดแล้ว</b> หรือกด <b>สแกนติดป้าย</b> แล้วสแกนป้ายที่เพิ่งติด</div>
+        <div class="text-[11px] text-slate-500">กดชั้นเพื่อดูรายการ · ติดเสร็จกด <b>📷 ถ่ายรูป · ติดแล้ว</b> (ต้องมีรูปทุกครั้ง) · หรือกด <b>สแกนติดป้าย</b> เพื่อหารายการจากป้าย</div>
+        <input id="tagPhotoInput" type="file" accept="image/*" capture="environment" class="hidden" onchange="onTagPhoto(event)">
       </div>
     </div>
     <div id="tagJobList" class="max-w-3xl mx-auto bg-white my-3 rounded-xl border border-slate-200 overflow-hidden"></div>
