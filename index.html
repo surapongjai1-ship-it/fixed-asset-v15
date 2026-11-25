@@ -3169,10 +3169,6 @@
       const close = () => document.getElementById('exportChooser').classList.add('hidden');
       document.getElementById('exportChooseExcel').onclick = () => { close(); isTags ? exportTagReprintList() : exportToExcelClean(); };
       document.getElementById('exportChoosePdf').onclick = () => { close(); isTags ? openTagReprintPdf() : openAuditReportPdf(); };
-      // ตัวเลือกคอลัมน์ใช้กับรายงานตรวจนับเท่านั้น
-      document.getElementById('exportPdfOpts').classList.toggle('hidden', isTags);
-      const cols = getPdfCols();
-      document.querySelectorAll('[data-pdfcol]').forEach(cb => { cb.checked = !!cols[cb.dataset.pdfcol]; });
       document.getElementById('exportChooser').classList.remove('hidden');
     }
 
@@ -3182,6 +3178,7 @@
       document.getElementById('signReport').classList.toggle('landscape', !!landscape);
     }
     function showPrintDoc(label, landscape, bodyHtml, warnHtml) {
+      document.getElementById('printDocOpts').classList.add('hidden');   // เปิดเฉพาะเอกสารที่มีตัวเลือก
       document.getElementById('signReportBody').innerHTML = bodyHtml;
       document.getElementById('signReportBody').style.fontSize = '';
       const warn = document.getElementById('signReportWarn');
@@ -3248,6 +3245,16 @@
         </div>
         ${tables}`, pdfHint);
       document.getElementById('signReportBody').style.fontSize = '9.5px';
+      // ตัวเลือกคอลัมน์ในหน้า PDF
+      document.querySelectorAll('[data-pdfcol]').forEach(cb => { cb.checked = !!opt[cb.dataset.pdfcol]; });
+      document.getElementById('printDocOpts').classList.remove('hidden');
+    }
+    function togglePdfCol(key, on) {
+      setPdfCol(key, on);
+      const sc = document.getElementById('signReport');
+      const top = sc.scrollTop;
+      openAuditReportPdf();
+      sc.scrollTop = top;
     }
 
     // PDF: รายการป้ายต้องทำใหม่ — จัดกลุ่มตามชั้น มีช่องติ๊ก "ติดแล้ว"
@@ -3470,6 +3477,7 @@
       warn.innerHTML = S.todo ? `⚠️ ยังมีรายการที่ <b>ยังไม่ได้ตรวจ ${S.todo.toLocaleString()} รายการ</b> — ในรายงานจะระบุตัวเลขนี้ไว้ ควรตรวจให้ครบก่อนพิมพ์ฉบับจริง` : '';
       warn.classList.toggle('hidden', !S.todo);
       setPrintDoc('📝 รายงานเซ็นรับรอง', false);
+      document.getElementById('printDocOpts').classList.add('hidden');
       document.getElementById('signReportBody').style.fontSize = '';
       document.getElementById('signReport').classList.remove('hidden');
       document.body.style.overflow = 'hidden';
@@ -3615,14 +3623,6 @@
         <i class="fa-solid fa-file-pdf text-2xl text-rose-600 w-8 text-center"></i>
         <span><b class="text-slate-900">PDF</b><span class="block text-xs text-slate-500">แนบส่งได้เลย เปิดดูได้ทุกเครื่อง แก้ไขไม่ได้</span></span>
       </button>
-      <div id="exportPdfOpts" class="-mt-1 px-3 pb-1 text-xs text-slate-600">
-        <div class="text-[11px] text-slate-400 mb-1">แสดงเพิ่มใน PDF (จำไว้ในเครื่องนี้)</div>
-        <div class="flex flex-wrap gap-x-4 gap-y-1">
-          <label class="flex items-center gap-1.5 cursor-pointer"><input type="checkbox" data-pdfcol="by" onchange="setPdfCol('by', this.checked)" class="rounded text-rose-600"> ตรวจโดย / วันที่</label>
-          <label class="flex items-center gap-1.5 cursor-pointer"><input type="checkbox" data-pdfcol="remark" onchange="setPdfCol('remark', this.checked)" class="rounded text-rose-600"> หมายเหตุ</label>
-          <label class="flex items-center gap-1.5 cursor-pointer"><input type="checkbox" data-pdfcol="type" onchange="setPdfCol('type', this.checked)" class="rounded text-rose-600"> ประเภท (สุ่ม/เพิ่มใหม่)</label>
-        </div>
-      </div>
       <button id="exportChooseExcel" class="w-full flex items-center gap-3 text-left border border-slate-200 hover:border-emerald-300 hover:bg-emerald-50 rounded-xl p-3">
         <i class="fa-solid fa-file-excel text-2xl text-emerald-600 w-8 text-center"></i>
         <span><b class="text-slate-900">Excel</b><span class="block text-xs text-slate-500">เอาไปกรอง คำนวณ หรือแก้ไขต่อ</span></span>
@@ -3635,6 +3635,12 @@
       <span id="printDocLabel" class="font-bold text-sm flex-1 truncate">📝 รายงานเซ็นรับรอง</span>
       <button onclick="printSignReport()" class="bg-blue-600 hover:bg-blue-700 text-sm px-3 py-1.5 rounded-lg"><i class="fa-solid fa-print mr-1"></i> พิมพ์ / PDF</button>
       <button onclick="closeSignReport()" aria-label="ปิด" class="bg-slate-700 hover:bg-slate-600 text-sm px-3 py-1.5 rounded-lg"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div id="printDocOpts" class="no-print hidden max-w-[210mm] mx-auto mt-3 bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-700">
+      <span class="text-slate-500 mr-2">แสดงคอลัมน์เพิ่ม:</span>
+      <label class="inline-flex items-center gap-1.5 mr-4 cursor-pointer"><input type="checkbox" data-pdfcol="by" onchange="togglePdfCol('by', this.checked)" class="rounded text-blue-600"> ตรวจโดย / วันที่</label>
+      <label class="inline-flex items-center gap-1.5 mr-4 cursor-pointer"><input type="checkbox" data-pdfcol="remark" onchange="togglePdfCol('remark', this.checked)" class="rounded text-blue-600"> หมายเหตุ</label>
+      <label class="inline-flex items-center gap-1.5 cursor-pointer"><input type="checkbox" data-pdfcol="type" onchange="togglePdfCol('type', this.checked)" class="rounded text-blue-600"> ประเภท (สุ่ม/เพิ่มใหม่)</label>
     </div>
     <div id="signReportWarn" class="no-print hidden max-w-[210mm] mx-auto mt-3 bg-amber-50 border border-amber-300 text-amber-800 text-sm rounded-lg px-3 py-2"></div>
     <div id="signReportBody" class="sheet bg-white max-w-[210mm] mx-auto my-3 p-[12mm] shadow-xl"></div>
