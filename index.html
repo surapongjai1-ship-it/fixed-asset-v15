@@ -2227,8 +2227,8 @@
       const done = T.total - T.todo;
       document.getElementById('execStamp').innerText = `ข้อมูล ณ ${new Date(at).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' })}`;
 
-      const kpi = (label, value, sub, color) => `
-        <div class="bg-white rounded-xl border border-slate-200 p-3 sm:p-4">
+      const kpi = (label, value, sub, color, extra = '') => `
+        <div class="bg-white rounded-xl border border-slate-200 p-3 sm:p-4 ${extra}">
           <div class="text-[11px] sm:text-xs text-slate-500">${label}</div>
           <div class="text-2xl sm:text-3xl font-bold ${color} mt-0.5">${value}</div>
           <div class="text-[11px] text-slate-400 mt-0.5">${sub}</div>
@@ -2277,7 +2277,7 @@
 
       document.getElementById('execBody').innerHTML = `
         <div class="grid grid-cols-2 lg:grid-cols-5 gap-2 sm:gap-3">
-          ${kpi('ทรัพย์สินทั้งหมด', T.total.toLocaleString(), `${rows.length} บริษัท`, 'text-slate-800')}
+          ${kpi('ทรัพย์สินทั้งหมด', T.total.toLocaleString(), `${rows.length} บริษัท`, 'text-slate-800', 'col-span-2 lg:col-span-1')}
           ${kpi('ตรวจนับแล้ว', execPct(done, T.total) + '%', `${done.toLocaleString()} รายการ`, 'text-blue-700')}
           ${kpi('ยังไม่ตรวจ', T.todo.toLocaleString(), 'รายการ', 'text-slate-600')}
           ${kpi('ชำรุด / สูญหาย', (T.damage + T.lost).toLocaleString(), `ชำรุด ${T.damage} · สูญหาย ${T.lost}`, T.damage + T.lost ? 'text-red-600' : 'text-slate-800')}
