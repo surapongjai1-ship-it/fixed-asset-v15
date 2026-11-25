@@ -75,6 +75,9 @@
       <button onclick="closeMobileMenu(); toggleMetaCard(true)" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
         <i class="fa-solid fa-user-pen w-5 text-center text-slate-300"></i> ผู้ตรวจ และวันที่ตรวจ
       </button>
+      <button onclick="closeMobileMenu(); openCompanyHistory()" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
+        <i class="fa-solid fa-clock-rotate-left w-5 text-center text-sky-400"></i> ประวัติการตรวจ
+      </button>
       <button onclick="closeMobileMenu(); exportToExcelClean()" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
         <i class="fa-solid fa-file-excel w-5 text-center text-emerald-400"></i> ส่งออก Excel
       </button>
@@ -721,11 +724,7 @@
     }
     // การ์ดที่กางส่วน "ป้าย / หมายเหตุ" ไว้ (จำไว้ เพราะรายการถูกวาดใหม่ทุกครั้งที่ข้อมูลเปลี่ยน)
     const expandedCards = new Set();
-    const expandedHistory = new Set();   // การ์ดที่กางประวัติไว้
-    function toggleHistory(docId) {
-      if (expandedHistory.has(docId)) expandedHistory.delete(docId); else expandedHistory.add(docId);
-      renderList();
-    }
+
     function toggleCardExtra(docId) {
       if (expandedCards.has(docId)) expandedCards.delete(docId); else expandedCards.add(docId);
       renderList();
@@ -928,6 +927,64 @@
       const v = (x) => x || (h.f === 'status' ? 'ยังไม่ตรวจ' : '-');
       return `${HISTORY_FIELD_LABEL[h.f] || h.f}: ${v(h.from)} → ${v(h.to)}`;
     }
+    // วันที่สำหรับจัดกลุ่ม: วันนี้ / เมื่อวาน / วันที่
+    function historyDayLabel(iso) {
+      const d = new Date(iso); if (isNaN(d)) return 'ไม่ทราบวันที่';
+      const day = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+      const diff = Math.round((day(new Date()) - day(d)) / 864e5);
+      return diff === 0 ? 'วันนี้' : diff === 1 ? 'เมื่อวาน' : d.toLocaleDateString('th-TH', { weekday: 'short', day: 'numeric', month: 'short', year: '2-digit' });
+    }
+    const fmtTime = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }); };
+    let historyMode = null;   // { docId } = รายการเดียว, { all: true } = ทั้งบริษัท
+
+    function openItemHistory(docId) { historyMode = { docId }; renderHistoryModal(); }
+    function openCompanyHistory() {
+      historyMode = { all: true };
+      document.getElementById('historySearch').value = '';
+      renderHistoryModal();
+    }
+    function closeHistoryModal() { historyMode = null; document.getElementById('historyModal').classList.add('hidden'); }
+
+    function renderHistoryModal() {
+      if (!historyMode) return;
+      const modal = document.getElementById('historyModal');
+      const searchBox = document.getElementById('historySearch');
+      searchBox.parentElement.classList.toggle('hidden', !historyMode.all);
+      let rows = [], title;
+      if (historyMode.all) {
+        title = `ประวัติการตรวจ — ${currentCompany}`;
+        assets.filter(a => a.company === currentCompany).forEach(a => (a.history || []).forEach(h => rows.push({ a, h })));
+        const q = searchBox.value.trim().toLowerCase();
+        if (q) rows = rows.filter(({ a, h }) => [a.code, a.name, a.location, h.by, historyText(h)].some(v => String(v || '').toLowerCase().includes(q)));
+      } else {
+        const a = assets.find(x => x.docId === historyMode.docId);
+        title = a ? `ประวัติ: ${a.code}` : 'ประวัติ';
+        if (a) rows = (a.history || []).map(h => ({ a, h }));
+      }
+      rows.sort((x, y) => String(y.h.at).localeCompare(String(x.h.at)));
+      document.getElementById('historyTitle').innerText = title;
+      document.getElementById('historyCount').innerText = `${rows.length.toLocaleString()} รายการ`;
+
+      let html = '', lastDay = null;
+      rows.slice(0, 500).forEach(({ a, h }) => {
+        const day = historyDayLabel(h.at);
+        if (day !== lastDay) { html += `<div class="sticky top-0 bg-slate-50 text-[11px] font-bold text-slate-500 px-2 py-1 mt-2 first:mt-0 rounded">${esc(day)}</div>`; lastDay = day; }
+        html += `
+          <div class="flex gap-2 px-2 py-1.5 border-b border-slate-100 text-xs">
+            <span class="font-mono text-slate-400 shrink-0 w-11">${esc(fmtTime(h.at))}</span>
+            <div class="min-w-0 flex-1">
+              ${historyMode.all ? `<div class="truncate text-slate-800"><span class="font-mono text-blue-700">#${esc(a.id || '-')} ${esc(a.code)}</span> ${esc(a.name || '')}</div>` : ''}
+              <div class="text-slate-600">${esc(historyText(h))}</div>
+            </div>
+            <span class="shrink-0 text-slate-500 text-[11px] max-w-[30%] truncate">${esc(h.by)}</span>
+          </div>`;
+      });
+      if (rows.length > 500) html += `<div class="text-center text-[11px] text-slate-400 py-2">แสดง 500 รายการล่าสุด · ดูทั้งหมดได้ใน Excel ชีต "ประวัติการตรวจ"</div>`;
+      document.getElementById('historyList').innerHTML = html ||
+        `<div class="text-center text-slate-400 text-xs py-8">ยังไม่มีประวัติ<br><span class="text-[11px]">เริ่มเก็บเมื่อมีการกดสถานะหลังเปิดใช้ฟีเจอร์นี้</span></div>`;
+      modal.classList.remove('hidden');
+    }
+
     function sortedHistory(item) {
       return (Array.isArray(item.history) ? item.history : []).slice().sort((a, b) => String(b.at).localeCompare(String(a.at)));
     }
@@ -2488,6 +2545,7 @@
           link(onlyWithPhotos, onlyWithPhotos ? 'onPhotoOnlyChange(false); renderLocationCheckboxes(); updateDashboard()' : 'showOnlyWithPhotos()', `📸 มีรูป <b>${withPhotos}</b>`)}</div>`;
 
       renderLocProgress(companyAssets);
+      if (historyMode) renderHistoryModal();
     }
 
     // ===================== Dashboard ผู้บริหาร =====================
@@ -2911,12 +2969,10 @@
               </div>
               <h3 class="font-bold text-slate-800 text-sm sm:text-xs mt-1.5 leading-snug">${esc(item.name)}</h3>
               <p class="text-sm sm:text-[11px] font-mono font-bold text-blue-600 mt-0.5"><i class="fa-solid fa-barcode mr-1"></i>${esc(item.code)}</p>
-              ${(isChecked(item) && item.checkedBy) || (item.history && item.history.length) ? `<p class="text-[11px] text-slate-400 mt-0.5 flex items-center gap-2 flex-wrap">
+              ${(isChecked(item) && item.checkedBy) || (item.history && item.history.length) ? `<p class="text-[11px] text-slate-400 mt-0.5 flex items-center gap-1.5">
                 ${isChecked(item) && item.checkedBy ? `<span><i class="fa-solid fa-user-check mr-1"></i>${esc(item.checkedBy)}${item.checkedAt ? ` · ${fmtCheckedAt(item.checkedAt)}` : ''}</span>` : ''}
-                ${item.history && item.history.length ? `<button onclick="toggleHistory(${js(item.docId)})" class="text-blue-600 hover:underline">ประวัติ (${item.history.length}) <i class="fa-solid fa-chevron-${expandedHistory.has(item.docId) ? 'up' : 'down'} text-[9px]"></i></button>` : ''}
+                ${item.history && item.history.length ? `<button onclick="openItemHistory(${js(item.docId)})" title="ดูประวัติ" aria-label="ดูประวัติ" class="text-slate-400 hover:text-blue-600 px-1"><i class="fa-solid fa-clock-rotate-left"></i></button>` : ''}
               </p>` : ''}
-              ${expandedHistory.has(item.docId) ? `<ul class="mt-1 text-[11px] text-slate-600 border-l-2 border-slate-200 pl-2 space-y-0.5">${sortedHistory(item).map(h => `
-                <li><span class="text-slate-400 font-mono">${esc(fmtCheckedAt(h.at))}</span> · ${esc(historyText(h))} <span class="text-slate-400">โดย ${esc(h.by)}</span></li>`).join('')}</ul>` : ''}
             </div>
             ${item.status ? `<span class="shrink-0 text-xs sm:text-[10px] font-bold px-2 py-0.5 rounded ${badgeStyle}">${esc(item.status)}</span>`
               : isFoundNoCondition(item) ? `<span class="shrink-0 text-xs sm:text-[10px] font-bold px-2 py-0.5 rounded bg-violet-100 text-violet-800">พบแล้ว</span>` : ''}
@@ -3086,6 +3142,23 @@
   </div>
   <div id="demoBanner" class="hidden fixed inset-0 z-[98] pointer-events-none border-4 border-orange-500">
     <div class="absolute top-0 left-1/2 -translate-x-1/2 bg-orange-500 text-white text-[11px] font-bold px-3 py-0.5 rounded-b-lg shadow">🧪 โหมดทดลอง · ข้อมูลจาก backup · ไม่บันทึกจริง</div>
+  </div>
+  <!-- ประวัติการตรวจ (รายการเดียว / ทั้งบริษัท) -->
+  <div id="historyModal" class="hidden fixed inset-0 z-[85] bg-black/50 flex items-end sm:items-center justify-center sm:p-4" onclick="if(event.target===this)closeHistoryModal()">
+    <div class="bg-white w-full sm:max-w-2xl rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col max-h-[85vh]">
+      <div class="flex items-start justify-between gap-2 p-4 pb-2">
+        <div class="min-w-0">
+          <h3 id="historyTitle" class="font-bold text-slate-900 truncate">ประวัติการตรวจ</h3>
+          <div id="historyCount" class="text-[11px] text-slate-500"></div>
+        </div>
+        <button onclick="closeHistoryModal()" aria-label="ปิด" class="text-slate-400 hover:text-slate-700 text-lg px-2"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="px-4 pb-2">
+        <input id="historySearch" type="text" oninput="renderHistoryModal()" placeholder="ค้นหา เลขทะเบียน ชื่อ สถานที่ หรือชื่อคนตรวจ..."
+          class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+      <div id="historyList" class="overflow-y-auto px-2 pb-4"></div>
+    </div>
   </div>
   <!-- ถามชื่อผู้ตรวจ (ครั้งแรกของเครื่อง) -->
   <div id="inspectorModal" class="hidden fixed inset-0 z-[95] bg-black/50 flex items-center justify-center p-4">
