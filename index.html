@@ -3110,30 +3110,45 @@
     }
 
     function exportToExcelClean() {
-      const meta = companyMetadata[currentCompany] || { inspector: "", date: "" };
       const companyAssets = assets.filter(a => a.company === currentCompany);
+      // วันเวลาเป็นวันที่จริงของ Excel (เรียง/กรองได้) — Timestamp จาก Firestore หรือข้อความ ISO
+      const toDate = (v) => { const d = v && typeof v.toDate === 'function' ? v.toDate() : (v ? new Date(v) : null); return d && !isNaN(d) ? d : ''; };
+      const statusText = (a) => a.status || (isFoundNoCondition(a) ? 'พบแล้ว (ไม่ระบุสภาพ)' : 'ยังไม่ตรวจ');
       const excelData = companyAssets.map((a, i) => ({
         "ลำดับที่": a.id || (i + 1), "บริษัท/องค์กร": a.company,
         "ประเภทการตรวจนับ": a.auditType === 'นอกสุ่ม' ? 'เพิ่มใหม่ (นอกสุ่ม)' : 'รายการสุ่ม',
-        "ผู้ตรวจนับ": meta.inspector, "วันที่ตรวจนับ": meta.date,
         "ประเภทสินทรัพย์": a.category, "เลขทะเบียนทรัพย์สิน": a.code, "ชื่อทรัพย์สิน": a.name,
         "สถานที่ตั้ง": a.location || '-', "ผู้รับผิดชอบ": a.owner, "สถานะป้าย": a.tag,
+        "สถานะการตรวจ": statusText(a),
         "สภาพดี/ปกติ": a.status === 'ดี' ? '✓' : '', "สภาพชำรุด": a.status === 'ชำรุด' ? '✓' : '',
-        "สภาพสูญหาย": a.status === 'สูญหาย' ? '✓' : '', "จำนวนรูปถ่าย": imgCountOf(a) > 0 ? `${imgCountOf(a)} รูป` : 'ไม่มีรูปถ่าย', "ตรวจโดย": isChecked(a) ? (a.checkedBy || '') : '', "วันเวลาที่ตรวจ": isChecked(a) ? fmtCheckedAt(a.checkedAt) : '', "ประวัติการแก้ (ครั้ง)": (a.history || []).length, "หมายเหตุ": a.remark || ''
+        "สภาพสูญหาย": a.status === 'สูญหาย' ? '✓' : '', "จำนวนรูปถ่าย": imgCountOf(a) > 0 ? `${imgCountOf(a)} รูป` : 'ไม่มีรูปถ่าย',
+        "ตรวจโดย": isChecked(a) ? (a.checkedBy || '') : '', "วันเวลาที่ตรวจ": isChecked(a) ? toDate(a.checkedAt) : '',
+        "ประวัติการแก้ (ครั้ง)": (a.history || []).length, "หมายเหตุ": a.remark || ''
       }));
+      const DATE_FMT = 'dd/mm/yyyy hh:mm';
+      // ตั้งความกว้างคอลัมน์ + ตัวกรองหัวตาราง
+      const finish = (ws, widths) => {
+        ws['!cols'] = widths.map(w => ({ wch: w }));
+        if (ws['!ref']) ws['!autofilter'] = { ref: ws['!ref'] };
+        return ws;
+      };
       const wb = XLSX.utils.book_new();
-      const ws = XLSX.utils.json_to_sheet(excelData);
+      const ws = finish(XLSX.utils.json_to_sheet(excelData, { dateNF: DATE_FMT }),
+        [8, 16, 18, 22, 20, 45, 28, 14, 12, 20, 10, 10, 10, 12, 16, 17, 10, 30]);
       XLSX.utils.book_append_sheet(wb, ws, "รายงานตรวจนับ");
       // ชีตประวัติการตรวจ: ทุกการเปลี่ยนแปลง เรียงตามเวลา
       const hist = [];
       companyAssets.forEach(a => (a.history || []).forEach(h => hist.push({ a, h })));
       hist.sort((x, y) => String(x.h.at).localeCompare(String(y.h.at)));
-      const wsH = XLSX.utils.json_to_sheet(hist.length ? hist.map(({ a, h }) => ({
-        "วันเวลา": fmtCheckedAt(h.at), "ลำดับที่": a.id || '', "เลขทะเบียนทรัพย์สิน": a.code, "ชื่อทรัพย์สิน": a.name,
-        "สถานที่ตั้ง": a.location || '-', "การเปลี่ยนแปลง": historyText(h), "โดย": h.by,
-      })) : [{ "หมายเหตุ": 'ยังไม่มีประวัติ (เริ่มเก็บตั้งแต่เปิดใช้ฟีเจอร์นี้)' }]);
+      const wsH = hist.length
+        ? finish(XLSX.utils.json_to_sheet(hist.map(({ a, h }) => ({
+            "วันเวลา": toDate(h.at), "ลำดับที่": a.id || '', "เลขทะเบียนทรัพย์สิน": a.code, "ชื่อทรัพย์สิน": a.name,
+            "สถานที่ตั้ง": a.location || '-', "การเปลี่ยนแปลง": historyText(h), "โดย": h.by,
+          })), { dateNF: DATE_FMT }), [17, 8, 20, 45, 28, 36, 16])
+        : XLSX.utils.json_to_sheet([{ "หมายเหตุ": 'ยังไม่มีประวัติ (เริ่มเก็บตั้งแต่เปิดใช้ฟีเจอร์นี้)' }]);
       XLSX.utils.book_append_sheet(wb, wsH, "ประวัติการตรวจ");
-      XLSX.writeFile(wb, `รายงานตรวจนับ_${currentCompany}${meta.date ? "_" + meta.date : ""}.xlsx`);
+      const today = new Date().toISOString().slice(0, 10);
+      XLSX.writeFile(wb, `รายงานตรวจนับ_${String(currentCompany).replace(/[\\/:*?"<>|]/g, '_')}_${today}.xlsx`);
     }
 
     // ===================== รายงานผลการตรวจนับ (เซ็นรับรอง) =====================
