@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>คู่มือการใช้งาน · ระบบตรวจนับสินทรัพย์ถาวร</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #f1f5f9; --card: #ffffff; --text: #0f172a; --muted: #64748b; --line: #e2e8f0;
+      --accent: #2563eb; --accent-soft: #eff6ff; --warn: #b45309; --warn-soft: #fffbeb;
+      --good: #059669; --violet: #7c3aed; --violet-soft: #f5f3ff;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --bg: #0b1220; --card: #111a2e; --text: #e2e8f0; --muted: #94a3b8; --line: #1e293b;
+        --accent: #60a5fa; --accent-soft: #10213f; --warn: #fbbf24; --warn-soft: #2a1f08;
+        --good: #34d399; --violet: #a78bfa; --violet-soft: #1d1638;
+      }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font-family: 'Sarabun', system-ui, sans-serif; line-height: 1.65; font-size: 16px; }
+    header { background: #0f172a; color: #fff; padding: 20px 16px 18px; }
+    header .wrap { max-width: 760px; margin: 0 auto; }
+    header h1 { margin: 0; font-size: 22px; }
+    header p { margin: 4px 0 0; color: #cbd5e1; font-size: 14px; }
+    header a.back { display: inline-block; margin-top: 12px; color: #fff; background: #2563eb; padding: 8px 14px; border-radius: 10px; text-decoration: none; font-weight: 600; font-size: 14px; }
+    main { max-width: 760px; margin: 0 auto; padding: 16px; }
+    nav.toc { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; margin-bottom: 14px; }
+    nav.toc b { font-size: 14px; }
+    nav.toc ol { margin: 6px 0 0; padding-left: 22px; columns: 2; column-gap: 24px; font-size: 14px; }
+    nav.toc a { color: var(--accent); text-decoration: none; }
+    @media (max-width: 520px) { nav.toc ol { columns: 1; } }
+    section { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin-bottom: 14px; scroll-margin-top: 12px; }
+    section h2 { margin: 0 0 8px; font-size: 18px; display: flex; gap: 8px; align-items: center; }
+    section h2 .n { background: var(--accent); color: #fff; border-radius: 999px; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; font-size: 14px; flex: none; }
+    ol.steps, ul { margin: 6px 0; padding-left: 22px; }
+    li { margin: 3px 0; }
+    .tip, .warn, .note { border-radius: 10px; padding: 10px 12px; margin-top: 10px; font-size: 14px; }
+    .tip { background: var(--accent-soft); }
+    .warn { background: var(--warn-soft); color: var(--warn); }
+    .note { background: var(--violet-soft); }
+    kbd, .btn { display: inline-block; border: 1px solid var(--line); background: var(--bg); border-radius: 6px; padding: 0 6px; font-family: inherit; font-size: 14px; white-space: nowrap; }
+    .pill { display: inline-block; border-radius: 6px; padding: 0 6px; font-size: 13px; font-weight: 700; color: #fff; }
+    .g { background: #059669; } .a { background: #d97706; } .r { background: #dc2626; } .v { background: #8b5cf6; } .s { background: #94a3b8; }
+    .mock { font-family: ui-monospace, Consolas, monospace; font-size: 13px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; overflow-x: auto; white-space: pre; margin-top: 8px; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 6px; }
+    td, th { border-top: 1px solid var(--line); padding: 7px 6px; text-align: left; vertical-align: top; }
+    th { color: var(--muted); font-weight: 600; font-size: 13px; border-top: 0; }
+    footer { text-align: center; color: var(--muted); font-size: 13px; padding: 8px 16px 32px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <h1>📖 คู่มือการใช้งาน</h1>
+      <p>ระบบตรวจนับสินทรัพย์ถาวร · อ่านจบใน 5 นาที</p>
+      <a class="back" href="./">← กลับไปที่แอป</a>
+    </div>
+  </header>
+
+  <main>
+    <nav class="toc">
+      <b>สารบัญ</b>
+      <ol>
+        <li><a href="#start">เริ่มใช้ครั้งแรก</a></li>
+        <li><a href="#check">ตรวจนับจากการ์ด</a></li>
+        <li><a href="#scan">สแกน QR / บาร์โค้ด</a></li>
+        <li><a href="#extra">เจอของที่ไม่อยู่ในรายการ</a></li>
+        <li><a href="#find">หารายการ / แยกตามชั้น</a></li>
+        <li><a href="#offline">ตอนเน็ตหลุด</a></li>
+        <li><a href="#history">ประวัติการตรวจ</a></li>
+        <li><a href="#export">ส่งออกรายงาน</a></li>
+        <li><a href="#careful">ข้อควรระวัง</a></li>
+        <li><a href="#demo">โหมดทดลอง (ฝึกใช้)</a></li>
+      </ol>
+    </nav>
+
+    <section id="start">
+      <h2><span class="n">1</span> เริ่มใช้ครั้งแรก</h2>
+      <ol class="steps">
+        <li>เปิดลิงก์แอปในมือถือ (แนะนำให้ <b>เพิ่มไปที่หน้าจอหลัก</b> จะได้เปิดง่าย)</li>
+        <li>จะมีหน้าต่าง <b>"ชื่อผู้ตรวจนับ"</b> ขึ้นมา → พิมพ์ชื่อตัวเอง → กด <span class="btn">บันทึก</span></li>
+        <li>เลือกบริษัทจากแถบด้านบน (🏢) แล้วเริ่มตรวจได้เลย</li>
+      </ol>
+      <div class="tip">💡 กรอกชื่อ <b>ครั้งเดียวต่อเครื่อง</b> — ตรวจกี่รายการก็ไม่ถามอีก ระบบแนบชื่อและเวลาให้เองทุกครั้งที่กดสถานะ<br>
+        ยืมเครื่องคนอื่นมาตรวจ → เปลี่ยนชื่อที่ <span class="btn">☰ เมนู</span> → <b>ผู้ตรวจเครื่องนี้</b></div>
+    </section>
+
+    <section id="check">
+      <h2><span class="n">2</span> ตรวจนับจากการ์ด</h2>
+      <p>แต่ละรายการเป็นการ์ด 1 ใบ มีลำดับ เลขทะเบียน ชื่อ และสถานที่</p>
+      <ul>
+        <li>กดสภาพ <span class="pill g">ดี</span> <span class="pill a">ชำรุด</span> <span class="pill r">สูญหาย</span> — <b>กดปุ่มเดิมซ้ำ = ยกเลิก</b></li>
+        <li><b>สถานะป้าย</b>: มีป้าย / ป้ายชำรุด / ไม่มีป้าย (ในมือถือกดปุ่ม 🏷️ เพื่อกาง)</li>
+        <li><span class="btn">📷 ถ่ายรูป</span> แนบรูปได้หลายรูป · <span class="btn">รูป (n)</span> เปิดดูรูป</li>
+        <li>ใต้เลขทะเบียนจะขึ้นว่า <b>ใครตรวจ เมื่อไหร่</b></li>
+      </ul>
+      <div class="mock">#12  ตู้แช่ไวน์ ชั้น 9                      [ดี]
+     671002212
+     👤 สมชาย · 25 พ.ย. 10:32  🕘</div>
+    </section>
+
+    <section id="scan">
+      <h2><span class="n">3</span> สแกน QR / บาร์โค้ด</h2>
+      <ol class="steps">
+        <li>กดปุ่มสีฟ้า <span class="btn">สแกน</span> ล่างขวา</li>
+        <li>เล็งกล้องไปที่ป้าย · ป้ายอยู่ไกลหรือเล็ก → <b>ถ่างสองนิ้วเพื่อซูม</b></li>
+        <li>เจอแล้วจะมีหน้าต่างขึ้น: <b>#ลำดับ</b> เลขทะเบียน ชื่อ 📍 สถานที่ → กดสภาพ → ปิดเองแล้วสแกนชิ้นต่อไปได้เลย</li>
+      </ol>
+      <div class="tip">💡 ถ้าขึ้นป้าย <b>"ตรวจแล้ว: ดี"</b> แปลว่ามีคนตรวจรายการนี้ไปแล้ว ไม่ต้องกดซ้ำ<br>
+        💡 สแกนเจอของบริษัทอื่น ระบบสลับบริษัทให้เอง</div>
+    </section>
+
+    <section id="extra">
+      <h2><span class="n">4</span> เจอของที่ไม่อยู่ในรายการ (นอกสุ่ม)</h2>
+      <ol class="steps">
+        <li>กด <span class="btn">+ เพิ่มนอกสุ่ม</span> ล่างซ้าย (หรือสแกนไม่เจอ → กดเพิ่ม)</li>
+        <li>กรอกเลขทะเบียน สถานที่ สภาพ ป้าย หมายเหตุ ถ่ายรูปได้</li>
+      </ol>
+      <div class="note">รายการนอกสุ่ม <b>นับว่าตรวจแล้วเสมอ</b> (เพราะเจอของจริง) · ถ้าไม่ได้เลือกสภาพ จะขึ้นป้าย <span class="pill v">พบแล้ว</span> และ <b>ไม่ไปอยู่ใน "ยังไม่ตรวจ"</b></div>
+    </section>
+
+    <section id="find">
+      <h2><span class="n">5</span> หารายการ / แยกตามชั้น</h2>
+      <ul>
+        <li><b>ช่องค้นหา</b>: พิมพ์เลขทะเบียน ชื่อ หรือสถานที่</li>
+        <li><b>กล่องสรุป</b>: กดตัวเลขได้ทุกตัว เช่น กด <span class="pill s">ยังไม่ตรวจ 208</span> = เหลือเฉพาะที่ยังไม่ตรวจ (กดซ้ำ = ยกเลิก)</li>
+        <li><b>📍 แยกตามสถานที่</b>: ดูว่าชั้นไหนยังตรวจไม่ครบ · กดชื่อชั้น (เช่น T1F6) = กรองทุกห้องในชั้นนั้น · กด ▸ เพื่อดูทีละห้อง</li>
+        <li><span class="btn">▼ ตัวกรอง</span>: เลือกหลายสถานที่ · เฉพาะที่มีรูป · สถานะป้าย · กด <b>Clear</b> เพื่อล้าง</li>
+      </ul>
+      <div class="tip">💡 ทำงานหลายคน: แบ่งกันคนละชั้น แต่ละคนกดชั้นของตัวเองใน "แยกตามสถานที่" · ทุกคนเห็นของกันและกันทันที</div>
+    </section>
+
+    <section id="offline">
+      <h2><span class="n">6</span> ตอนเน็ตหลุด (ห้องเก็บของ ลานจอดรถ)</h2>
+      <p>ตรวจต่อได้ตามปกติ ระบบเก็บไว้ในเครื่องก่อน แล้วส่งให้เองเมื่อมีเน็ต</p>
+      <table>
+        <tr><th>แถบด้านบน</th><th>แปลว่า</th></tr>
+        <tr><td>📴 ออฟไลน์ · รอส่ง 3 รายการ</td><td>บันทึกในเครื่องแล้ว ยังไม่ได้ส่ง</td></tr>
+        <tr><td>⏳ กำลังส่งข้อมูล 3 รายการ...</td><td>เน็ตกลับมาแล้ว กำลังส่ง</td></tr>
+        <tr><td>(ไม่มีแถบ)</td><td>ส่งครบแล้ว ✓</td></tr>
+      </table>
+      <div class="warn">⚠️ ถ้ามีคำว่า <b>"รอส่ง"</b> อย่าเพิ่งปิดแอปหรือล้างข้อมูลเบราว์เซอร์ — เดินไปที่มีเน็ตก่อน รอจนแถบหายไป<br>
+        ⚠️ นำเข้า Excel / กู้คืน Tab / ลบ Tab ต้องมีเน็ต</div>
+    </section>
+
+    <section id="history">
+      <h2><span class="n">7</span> ประวัติการตรวจ</h2>
+      <ul>
+        <li>ทุกครั้งที่เปลี่ยนสภาพหรือป้าย ระบบเก็บประวัติไว้ <b>ไม่ลบของเก่า</b> (แก้ชื่อผิดแล้ว ชื่อเดิมก็ยังอยู่)</li>
+        <li>ดูของรายการเดียว: กด <span class="btn">🕘</span> บนการ์ด</li>
+        <li>ดูทั้งบริษัท: <span class="btn">☰ เมนู</span> → <b>ประวัติการตรวจ</b> (แบ่งตามวัน ค้นหาชื่อคนหรือเลขทะเบียนได้)</li>
+      </ul>
+    </section>
+
+    <section id="export">
+      <h2><span class="n">8</span> ส่งออกรายงาน (☰ เมนู)</h2>
+      <table>
+        <tr><th>เมนู</th><th>ได้อะไร</th></tr>
+        <tr><td><b>📊 Dashboard ผู้บริหาร</b></td><td>ภาพรวมทุกบริษัท วันนี้ตรวจไปกี่รายการ คาดว่าเสร็จวันไหน · กด 🖨️ เพื่อบันทึก PDF</td></tr>
+        <tr><td><b>ส่งออก Excel</b></td><td>รายงานตรวจนับ (มีคนตรวจ/เวลา) + ชีตประวัติการตรวจ</td></tr>
+        <tr><td><b>ส่งออกรายการป้ายต้องทำใหม่</b></td><td>รายการป้ายชำรุด/ไม่มีป้าย เรียงตามชั้น ส่งให้คนพิมพ์ป้าย</td></tr>
+        <tr><td><b>โหลดรูปทั้งหมด (.zip)</b></td><td>รูปทุกรายการของบริษัท</td></tr>
+      </table>
+    </section>
+
+    <section id="careful">
+      <h2><span class="n">9</span> ข้อควรระวัง</h2>
+      <ul>
+        <li><b>ลบรายการ / ลบ Tab</b> จะไปอยู่ในถังขยะ กู้คืนได้ · แต่ <b>"ลบถาวร"</b> ในถังขยะกู้ไม่ได้</li>
+        <li><b>ไม่ต้องรีเฟรชหน้าบ่อย</b> — ข้อมูลอัปเดตเองอยู่แล้ว การรีเฟรชถี่ๆ ทำให้โควต้าฐานข้อมูลรายวันหมดเร็ว (ถ้าหมด จะใช้ได้อีกทีหลังประมาณ 15:00 น.)</li>
+        <li>ใช้มือถือเครื่องเดียวกันหลายคน → <b>เปลี่ยนชื่อผู้ตรวจก่อนเริ่ม</b></li>
+      </ul>
+    </section>
+
+    <section id="demo">
+      <h2><span class="n">10</span> โหมดทดลอง (ฝึกใช้ก่อนตรวจจริง)</h2>
+      <p><span class="btn">☰ เมนู</span> → <b>🧪 โหมดทดลอง</b> → เลือกไฟล์ backup → ลองกดอะไรก็ได้ <b>ไม่บันทึกจริง</b> (มีกรอบสีส้มรอบจอ) · ปิดหน้าแล้วหายหมด</p>
+      <div class="warn">⚠️ ไฟล์ backup มีข้อมูลของบริษัท — ขอจากผู้ดูแลระบบเท่านั้น และห้ามส่งต่อออกนอกบริษัท</div>
+    </section>
+  </main>
+
+  <footer>มีปัญหาหรือข้อสงสัย ติดต่อผู้ดูแลระบบ</footer>
+</body>
+</html>
