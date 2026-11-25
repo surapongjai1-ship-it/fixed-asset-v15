@@ -3259,10 +3259,6 @@
       const period = times.length ? (dfmt(times[0]) === dfmt(times.at(-1)) ? dfmt(times[0]) : `${dfmt(times[0])} – ${dfmt(times.at(-1))}`)
         : (meta.date ? dfmt(new Date(meta.date)) : '........................');
 
-      const people = {};
-      all.filter(isChecked).forEach(a => { if (a.checkedBy) people[a.checkedBy] = (people[a.checkedBy] || 0) + 1; });
-      const peopleList = Object.entries(people).sort((a, b) => b[1] - a[1]);
-
       const row = (cells) => '<tr>' + cells.map(c => `<td${c && c.num ? ' class="num"' : ''}${c && c.span ? ` colspan="${c.span}"` : ''}>${(c && typeof c === 'object') ? c.html : esc(c)}</td>`).join('') + '</tr>';
       const n = (v) => ({ html: Number(v).toLocaleString(), num: true });
       const groupHead = (name, cols) => `<tr><td colspan="${cols}" style="background:#f8fafc;font-weight:700">${esc(name)}</td></tr>`;
@@ -3323,11 +3319,7 @@
             { html: c.list.map(a => `${esc(a._tab)}: ${esc(a.status || 'ยังไม่ตรวจ')}`).join('<br>') }, { html: `<b>${esc(c.win.status)}</b>` }])).join('')}
         </tbody></table>` : ''}
 
-        <h3>3. ผู้ตรวจนับ</h3>
-        <div>${peopleList.length ? peopleList.map(([nm, c]) => `${esc(nm)} (${c.toLocaleString()} รายการ)`).join(', ')
-          : (meta.inspector ? esc(meta.inspector) : '........................................')}</div>
-
-        <h3>4. ลงชื่อรับรอง</h3>
+        <h3>3. ลงชื่อรับรอง</h3>
         <div class="sign-block" style="display:grid;grid-template-columns:1fr 1fr;gap:18mm 12mm;margin-top:10mm">
           ${['ผู้ตรวจนับ', 'ผู้ตรวจนับ', 'ผู้ตรวจสอบ (ฝ่ายบัญชี)', 'ผู้อนุมัติ'].map(role => `
             <div style="text-align:center">
