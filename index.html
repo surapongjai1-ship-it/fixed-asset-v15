@@ -3119,13 +3119,15 @@
       renderList();
     }
 
-    function exportToExcelClean() {
-      const companyAssets = assets.filter(a => a.company === currentCompany);
+    function exportToExcelClean(ctx) {
+      ctx = ctx || currentExportCtx();
+      const companyAssets = ctx.items;
       // วันเวลาเป็นวันที่จริงของ Excel (เรียง/กรองได้) — Timestamp จาก Firestore หรือข้อความ ISO
       const toDate = (v) => { const d = v && typeof v.toDate === 'function' ? v.toDate() : (v ? new Date(v) : null); return d && !isNaN(d) ? d : ''; };
       const statusText = (a) => a.status || (isFoundNoCondition(a) ? 'พบแล้ว (ไม่ระบุสภาพ)' : 'ยังไม่ตรวจ');
       const excelData = companyAssets.map((a, i) => ({
-        "ลำดับที่": a.id || (i + 1), "บริษัท/องค์กร": a.company,
+        "ลำดับที่": a.id || (i + 1), "บริษัท/องค์กร": a._tab || a.company,
+        ...(ctx.multi ? { "พบใน (หลาย Tab)": a._tabs && a._tabs.length > 1 ? a._tabs.join(', ') : '' } : {}),
         "ประเภทการตรวจนับ": a.auditType === 'นอกสุ่ม' ? 'เพิ่มใหม่ (นอกสุ่ม)' : 'รายการสุ่ม',
         "ประเภทสินทรัพย์": a.category, "เลขทะเบียนทรัพย์สิน": a.code, "ชื่อทรัพย์สิน": a.name,
         "สถานที่ตั้ง": a.location || '-', "ผู้รับผิดชอบ": a.owner, "สถานะป้าย": a.tag,
@@ -3144,34 +3146,55 @@
       };
       const wb = XLSX.utils.book_new();
       const ws = finish(XLSX.utils.json_to_sheet(excelData, { dateNF: DATE_FMT }),
-        [8, 16, 18, 22, 20, 45, 28, 14, 12, 20, 10, 10, 10, 12, 16, 17, 10, 30]);
+        [8, 16, ...(ctx.multi ? [24] : []), 18, 22, 20, 45, 28, 14, 12, 20, 10, 10, 10, 12, 16, 17, 10, 30]);
       XLSX.utils.book_append_sheet(wb, ws, "รายงานตรวจนับ");
       // ชีตประวัติการตรวจ: ทุกการเปลี่ยนแปลง เรียงตามเวลา
       const hist = [];
-      companyAssets.forEach(a => (a.history || []).forEach(h => hist.push({ a, h })));
+      ctx.raw.forEach(a => (a.history || []).forEach(h => hist.push({ a, h })));   // ประวัติจากทุกสำเนา (ทุก Tab)
       hist.sort((x, y) => String(x.h.at).localeCompare(String(y.h.at)));
       const wsH = hist.length
         ? finish(XLSX.utils.json_to_sheet(hist.map(({ a, h }) => ({
-            "วันเวลา": toDate(h.at), "ลำดับที่": a.id || '', "เลขทะเบียนทรัพย์สิน": a.code, "ชื่อทรัพย์สิน": a.name,
+            "วันเวลา": toDate(h.at), ...(ctx.multi ? { "Tab": a._tab } : {}), "ลำดับที่": a.id || '', "เลขทะเบียนทรัพย์สิน": a.code, "ชื่อทรัพย์สิน": a.name,
             "สถานที่ตั้ง": a.location || '-', "การเปลี่ยนแปลง": historyText(h), "โดย": h.by,
-          })), { dateNF: DATE_FMT }), [17, 8, 20, 45, 28, 36, 16])
+          })), { dateNF: DATE_FMT }), [17, ...(ctx.multi ? [16] : []), 8, 20, 45, 28, 36, 16])
         : XLSX.utils.json_to_sheet([{ "หมายเหตุ": 'ยังไม่มีประวัติ (เริ่มเก็บตั้งแต่เปิดใช้ฟีเจอร์นี้)' }]);
       XLSX.utils.book_append_sheet(wb, wsH, "ประวัติการตรวจ");
+      // รวมหลาย Tab: ชีตรายการซ้ำ / ผลไม่ตรงกัน
+      if (ctx.multi) {
+        const dups = companyAssets.filter(a => a._tabs && a._tabs.length > 1);
+        const conflictCodes = new Set(ctx.conflicts.map(c => c.win.code));
+        const wsD = dups.length
+          ? finish(XLSX.utils.json_to_sheet(dups.map(a => ({
+              "เลขทะเบียนทรัพย์สิน": a.code, "ชื่อทรัพย์สิน": a.name, "พบใน": a._tabs.join(', '),
+              "ผลแต่ละ Tab": ctx.raw.filter(x => String(x.code || '').trim().toUpperCase() === String(a.code || '').trim().toUpperCase())
+                .map(x => `${x._tab}: ${x.status || (isFoundNoCondition(x) ? 'พบแล้ว' : 'ยังไม่ตรวจ')}`).join(' | '),
+              "ผลที่ใช้": statusText(a), "ใช้ผลจาก Tab": a._tab, "ผลไม่ตรงกัน": conflictCodes.has(a.code) ? '⚠️' : '',
+            }))), [20, 45, 30, 50, 16, 16, 12])
+          : XLSX.utils.json_to_sheet([{ "หมายเหตุ": 'ไม่มีเลขทะเบียนซ้ำระหว่าง Tab' }]);
+        XLSX.utils.book_append_sheet(wb, wsD, "รายการซ้ำระหว่าง Tab");
+      }
       const today = new Date().toISOString().slice(0, 10);
-      XLSX.writeFile(wb, `รายงานตรวจนับ_${String(currentCompany).replace(/[\\/:*?"<>|]/g, '_')}_${today}.xlsx`);
+      XLSX.writeFile(wb, `รายงานตรวจนับ_${safeFile(ctx.label)}_${today}.xlsx`);
     }
 
-    // ===================== ส่งออก: เลือก Excel หรือ PDF =====================
-    function chooseExportFormat(kind) {
-      if (assetsLoading) return alert("กำลังโหลดรายการ รอสักครู่แล้วลองใหม่ครับ");
-      const isTags = kind === 'tags';
-      document.getElementById('exportChooserTitle').innerText = isTags ? 'ส่งออกรายการป้ายต้องทำใหม่' : 'ส่งออกรายงานตรวจนับ';
-      document.getElementById('exportChooserSub').innerText = currentCompany;
-      const close = () => document.getElementById('exportChooser').classList.add('hidden');
-      document.getElementById('exportChooseExcel').onclick = () => { close(); isTags ? exportTagReprintList() : exportToExcelClean(); };
-      document.getElementById('exportChoosePdf').onclick = () => { close(); isTags ? openTagReprintPdf() : openAuditReportPdf(); };
-      document.getElementById('exportChooser').classList.remove('hidden');
+    // ===================== ส่งออก: เลือก Tab + รูปแบบ (PDF / Excel) =====================
+    function chooseExportFormat(kind) { openTabPicker(kind === 'tags' ? 'tags' : 'report'); }
+
+    // ชุดข้อมูลสำหรับส่งออก: รวมหลาย Tab แล้วตัดเลขทะเบียนซ้ำ (ใช้หลักเดียวกับใบเซ็นรับรอง)
+    // ctx = { tabs, multi, items (ไม่ซ้ำ), raw (ทุกสำเนา), dupCount, conflicts, label }
+    function makeExportCtx(tabs) {
+      const names = tabs.map(t => t.name);
+      const multi = tabs.length > 1;
+      const raw = tabs.flatMap(t => t.list.map(a => ({ ...a, _tab: t.name })));
+      const m = multi ? dedupeAcrossTabs(raw, names) : { all: raw, dupCount: 0, conflicts: [] };
+      const order = (a) => names.indexOf(a._tab);
+      const items = m.all.slice().sort((a, b) => order(a) - order(b) || (Number(a.id) || 0) - (Number(b.id) || 0));
+      return { tabs: names, multi, items, raw, dupCount: m.dupCount, conflicts: m.conflicts, label: names.join(' + ') };
     }
+    function currentExportCtx() {
+      return makeExportCtx([{ name: currentCompany, list: assets.filter(a => a.company === currentCompany) }]);
+    }
+    const safeFile = (s) => String(s).replace(/[\\/:*?"<>|]/g, '_').slice(0, 80);
 
     // ใช้หน้าพิมพ์เดียวกับรายงานเซ็นรับรอง: ตั้งชื่อแถบบน + แนวกระดาษ
     function setPrintDoc(label, landscape) {
@@ -3203,8 +3226,11 @@
       try { localStorage.setItem(PDF_COLS_KEY, JSON.stringify(c)); } catch (e) {}
     }
 
-    function openAuditReportPdf() {
-      const list = assets.filter(a => a.company === currentCompany).slice().sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
+    let lastAuditCtx = null;   // ไว้วาดใหม่ตอนติ๊กคอลัมน์
+    function openAuditReportPdf(ctx) {
+      ctx = ctx || lastAuditCtx || currentExportCtx();
+      lastAuditCtx = ctx;
+      const list = ctx.items;
       const sampled = list.filter(a => a.auditType !== 'นอกสุ่ม');
       const cnt = (fn) => sampled.filter(fn).length;
       const done = cnt(a => a.status), good = cnt(a => a.status === 'ดี'), dmg = cnt(a => a.status === 'ชำรุด'), lost = cnt(a => a.status === 'สูญหาย');
@@ -3217,7 +3243,7 @@
       const clip = (v) => `<div class="clip">${esc(v)}</div>`;
       const rowsHtml = list.map((a, i) => `
         <tr class="${a.status === 'ชำรุด' || a.status === 'สูญหาย' ? 'bad' : ''}">
-          <td class="num">${esc(a.id || i + 1)}</td><td class="one">${esc(a.code)}</td>
+          <td class="num">${esc(a.id || i + 1)}</td>${ctx.multi ? `<td class="one">${esc(a._tab)}</td>` : ''}<td class="one">${esc(a.code)}</td>
           <td>${clip(a.name)}</td><td>${clip(a.location || '-')}</td>
           <td class="one">${esc(statusText(a))} · ${esc(a.tag || '-')}</td>
           ${opt.type ? `<td class="one">${a.auditType === 'นอกสุ่ม' ? 'เพิ่มใหม่' : 'สุ่ม'}</td>` : ''}
@@ -3225,10 +3251,11 @@
           ${opt.remark ? `<td>${clip(a.remark || '')}</td>` : ''}
         </tr>`);
       // ความกว้างคอลัมน์ (%): ลำดับ, เลขทะเบียน, ชื่อ (ที่เหลือ), สถานที่, สภาพ·ป้าย, [ประเภท], [ตรวจโดย], [หมายเหตุ]
-      const widths = [5, 15, 0, 16, 15, ...(opt.type ? [8] : []), ...(opt.by ? [15] : []), ...(opt.remark ? [12] : [])];
-      widths[2] = 100 - widths.reduce((x, y) => x + y, 0);
+      const widths = [5, ...(ctx.multi ? [12] : []), 15, 0, 16, 15, ...(opt.type ? [8] : []), ...(opt.by ? [15] : []), ...(opt.remark ? [12] : [])];
+      const nameIdx = ctx.multi ? 3 : 2;
+      widths[nameIdx] = 100 - widths.reduce((x, y) => x + y, 0);
       const head = '<colgroup>' + widths.map(w => `<col style="width:${w}%">`).join('') + '</colgroup>' + `<thead><tr>
-          <th class="num">ลำดับ</th><th>เลขทะเบียน</th><th>ชื่อทรัพย์สิน</th><th>สถานที่</th><th>สภาพ · ป้าย</th>
+          <th class="num">ลำดับ</th>${ctx.multi ? '<th>Tab</th>' : ''}<th>เลขทะเบียน</th><th>ชื่อทรัพย์สิน</th><th>สถานที่</th><th>สภาพ · ป้าย</th>
           ${opt.type ? '<th>ประเภท</th>' : ''}${opt.by ? '<th>ตรวจโดย</th>' : ''}${opt.remark ? '<th>หมายเหตุ</th>' : ''}
         </tr></thead>`;
       const pages = [];
@@ -3241,10 +3268,11 @@
         </div>`).join('');
       showPrintDoc('📄 รายงานตรวจนับ (PDF)', false, `
         <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap">
-          <div style="font-size:14px;font-weight:700">รายงานการตรวจนับทรัพย์สินถาวร — ${esc(currentCompany)}</div>
+          <div style="font-size:14px;font-weight:700">รายงานการตรวจนับทรัพย์สินถาวร — ${esc(ctx.label)}</div>
           <div style="font-weight:600">ตรวจแล้ว ${done.toLocaleString()}/${sampled.length.toLocaleString()} (${pct}%) · ดี ${good} · ชำรุด ${dmg} · สูญหาย ${lost} · ยังไม่ตรวจ ${sampled.length - done}${list.length > sampled.length ? ` · เพิ่มใหม่ ${list.length - sampled.length}` : ''}</div>
         </div>
-        ${tables}`, pdfHint);
+        ${tables}
+        ${ctx.multi && ctx.dupCount ? `<div style="color:#64748b;margin-top:2px">* เลขทะเบียนซ้ำระหว่าง Tab ${ctx.dupCount.toLocaleString()} รายการ นับครั้งเดียว (ใช้ผลที่ตรวจแล้ว/ล่าสุด)</div>` : ''}`, pdfHint);
       document.getElementById('signReportBody').style.fontSize = '9.5px';
       // ตัวเลือกคอลัมน์ในหน้า PDF
       document.querySelectorAll('[data-pdfcol]').forEach(cb => { cb.checked = !!opt[cb.dataset.pdfcol]; });
@@ -3259,12 +3287,16 @@
     }
 
     // PDF: รายการป้ายต้องทำใหม่ — จัดกลุ่มตามชั้น มีช่องติ๊ก "ติดแล้ว"
-    function openTagReprintPdf() {
-      const list = assets.filter(a => a.company === currentCompany && (a.tag === 'ป้ายชำรุด' || a.tag === 'ไม่มีป้าย'));
-      if (!list.length) return alert(`"${currentCompany}" ไม่มีรายการที่ต้องทำป้ายใหม่ครับ`);
-      const floorOf = (a) => floorKeyOf(a.location) || 'อื่นๆ';
+    function openTagReprintPdf(ctx) {
+      ctx = ctx || currentExportCtx();
+      const list = ctx.items.filter(a => a.tag === 'ป้ายชำรุด' || a.tag === 'ไม่มีป้าย');
+      if (!list.length) return alert(`"${ctx.label}" ไม่มีรายการที่ต้องทำป้ายใหม่ครับ`);
+      // รวมหลาย Tab: จัดกลุ่มตาม Tab แล้วตามชั้น (ชั้นชื่อเดียวกันของคนละ Tab ไม่ปนกัน)
+      const floorOf = (a) => (ctx.multi ? a._tab + ' · ' : '') + (floorKeyOf(a.location) || 'อื่นๆ');
       const nat = (x, y) => String(x).localeCompare(String(y), 'th', { numeric: true });
-      list.sort((a, b) => ((floorOf(a) === 'อื่นๆ') - (floorOf(b) === 'อื่นๆ')) || nat(floorOf(a), floorOf(b)) || nat(a.location || '-', b.location || '-') || (Number(a.id) || 0) - (Number(b.id) || 0));
+      const tabIdx = (a) => ctx.tabs.indexOf(a._tab);
+      const other = (a) => !floorKeyOf(a.location);
+      list.sort((a, b) => tabIdx(a) - tabIdx(b) || (other(a) - other(b)) || nat(floorOf(a), floorOf(b)) || nat(a.location || '-', b.location || '-') || (Number(a.id) || 0) - (Number(b.id) || 0));
       const floors = [...new Set(list.map(floorOf))];
       let i = 0;
       const groups = floors.map(f => {
@@ -3274,16 +3306,18 @@
       }).join('');
       const broken = list.filter(a => a.tag === 'ป้ายชำรุด').length;
       showPrintDoc('🏷️ ป้ายต้องทำใหม่ (PDF)', false, `
-        <div style="font-size:16px;font-weight:700">รายการป้ายต้องทำใหม่ — ${esc(currentCompany)}</div>
+        <div style="font-size:16px;font-weight:700">รายการป้ายต้องทำใหม่ — ${esc(ctx.label)}</div>
         <div style="color:#475569;margin-bottom:4px">รวม ${list.length} รายการ (ป้ายชำรุด ${broken} · ไม่มีป้าย ${list.length - broken}) · ${floors.length} ชั้น/จุด</div>
         <table class="rpt compact"><thead><tr><th class="num">ที่</th><th>สถานที่</th><th>เลขทะเบียน</th><th>ชื่อทรัพย์สิน</th><th>สถานะป้าย</th><th>ติดแล้ว</th></tr></thead>
         <tbody>${groups}</tbody></table>`, pdfHint);
     }
 
-    // ===================== รายงานผลการตรวจนับ (เซ็นรับรอง) =====================
-    // ใช้ข้อมูลของบริษัทที่เปิดอยู่ (โหลดไว้แล้ว ไม่อ่านฐานข้อมูลเพิ่ม)
-    // ===== ขั้นที่ 1: เลือก Tab ที่จะรวมในรายงาน =====
-    function openSignReport() {
+    // ===================== หน้าต่างเลือก Tab (ใช้กับใบเซ็นรับรอง และการส่งออกทุกแบบ) =====================
+    let pickMode = 'sign';   // 'sign' | 'report' | 'tags'
+    function openSignReport() { openTabPicker('sign'); }
+    function openTabPicker(mode) {
+      if (assetsLoading) return alert("กำลังโหลดรายการ รอสักครู่แล้วลองใหม่ครับ");
+      pickMode = mode;
       const box = document.getElementById('signPickList');
       const names = companyNames.length ? companyNames : [currentCompany];
       box.innerHTML = names.map(c => {
@@ -3297,12 +3331,20 @@
             <span class="text-xs text-slate-400 font-mono shrink-0">${n === undefined ? '…' : n.toLocaleString() + ' รายการ'}</span>
           </label>`;
       }).join('');
+      const titles = { sign: '📝 รายงานเซ็นรับรอง', report: '📤 ส่งออกรายงานตรวจนับ', tags: '🏷️ ส่งออกรายการป้ายต้องทำใหม่' };
+      document.getElementById('signPickTitle').innerText = titles[mode];
+      document.getElementById('signTitleWrap').classList.toggle('hidden', mode !== 'sign');
+      document.getElementById('signPickGo').classList.toggle('hidden', mode !== 'sign');
+      document.getElementById('pickFormatBtns').classList.toggle('hidden', mode === 'sign');
       document.getElementById('signTitleInput').value = 'รายงานผลการตรวจนับทรัพย์สินถาวร';
       document.getElementById('signPickMsg').innerText = '';
       syncSignPick();
       document.getElementById('signPicker').classList.remove('hidden');
     }
     function signPicked() { return [...document.querySelectorAll('.sign-pick')].filter(c => c.checked).map(c => c.value); }
+    function setPickBusy(busy) {
+      document.querySelectorAll('#signPickGo, .pick-go').forEach(b => { b.disabled = busy || !signPicked().length; });
+    }
     function syncSignPick() {
       const picked = signPicked();
       // ประมาณโควต้า: Tab ที่ไม่ได้เปิดอยู่ต้องโหลดมาใหม่
@@ -3310,36 +3352,52 @@
       document.getElementById('signPickInfo').innerText = picked.length
         ? `เลือก ${picked.length} Tab` + (reads ? ` · ต้องโหลดเพิ่มประมาณ ${reads.toLocaleString()} รายการ` : '')
         : 'ยังไม่ได้เลือก';
-      document.getElementById('signPickGo').disabled = !picked.length;
+      setPickBusy(false);
     }
     function closeSignPicker() { document.getElementById('signPicker').classList.add('hidden'); }
 
-    // ===== ขั้นที่ 2: โหลดข้อมูล Tab ที่เลือก แล้วสร้างรายงาน =====
-    async function buildSignReport() {
+    // โหลดข้อมูล Tab ที่เลือก (Tab ที่เปิดอยู่ใช้ข้อมูลที่มีแล้ว ไม่อ่านซ้ำ)
+    async function loadPickedTabs(picked, msg) {
+      const tabs = [];
+      for (const c of picked) {
+        if (c === currentCompany && !assetsLoading) { tabs.push({ name: c, list: assets.filter(a => a.company === c) }); continue; }
+        msg.innerText = `กำลังโหลด "${c}"...`;
+        const snap = await db.collection(ASSETS_COL).where('company', '==', c).get();
+        tabs.push({ name: c, list: snap.docs.map(normalizeAsset) });
+      }
+      msg.innerText = '';
+      return tabs;
+    }
+
+    // format: 'sign' | 'pdf' | 'excel'
+    async function runPicked(format) {
       const picked = signPicked();
       if (!picked.length) return;
-      const title = document.getElementById('signTitleInput').value.trim() || 'รายงานผลการตรวจนับทรัพย์สินถาวร';
       const msg = document.getElementById('signPickMsg');
-      const go = document.getElementById('signPickGo');
-      go.disabled = true;
+      setPickBusy(true);
       try {
-        const tabs = [];
-        for (const c of picked) {
-          if (c === currentCompany && !assetsLoading) { tabs.push({ name: c, list: assets.filter(a => a.company === c) }); continue; }
-          msg.innerText = `กำลังโหลด "${c}"...`;
-          const snap = await db.collection(ASSETS_COL).where('company', '==', c).get();
-          tabs.push({ name: c, list: snap.docs.map(normalizeAsset) });
+        const tabs = await loadPickedTabs(picked, msg);
+        if (pickMode === 'sign') {
+          const title = document.getElementById('signTitleInput').value.trim() || 'รายงานผลการตรวจนับทรัพย์สินถาวร';
+          closeSignPicker();
+          return renderSignReport(tabs, title);
         }
-        msg.innerText = '';
+        const ctx = makeExportCtx(tabs);
+        if (pickMode === 'tags' && !ctx.items.some(a => a.tag === 'ป้ายชำรุด' || a.tag === 'ไม่มีป้าย')) {
+          msg.innerText = 'Tab ที่เลือกไม่มีรายการที่ต้องทำป้ายใหม่';
+          return;
+        }
         closeSignPicker();
-        renderSignReport(tabs, title);
+        if (pickMode === 'report') format === 'pdf' ? openAuditReportPdf(ctx) : exportToExcelClean(ctx);
+        else format === 'pdf' ? openTagReprintPdf(ctx) : exportTagReprintList(ctx);
       } catch (err) {
         const quota = err && (err.code === 'resource-exhausted' || /quota/i.test(err.message || ''));
         msg.innerText = quota ? 'โควต้าฐานข้อมูลของวันนี้หมด ลองใหม่หลังประมาณ 15:00 น.' : 'โหลดไม่สำเร็จ: ' + err.message;
       } finally {
-        go.disabled = false;
+        setPickBusy(false);
       }
     }
+    async function buildSignReport() { pickMode = 'sign'; return runPicked('sign'); }
 
     // สถิติของรายการชุดหนึ่ง (นับเฉพาะรายการสุ่มเป็น "ตามทะเบียน", นอกสุ่ม = พบเพิ่ม)
     function signStats(list) {
@@ -3496,19 +3554,22 @@
 
     // ส่งออกรายการป้ายต้องทำใหม่ (ป้ายชำรุด + ไม่มีป้าย) ของบริษัทที่เปิดอยู่ เรียงตามชั้น/สถานที่ ไว้ส่งคนพิมพ์ป้าย
     // ใช้ข้อมูลที่โหลดไว้แล้ว ไม่อ่านฐานข้อมูลเพิ่ม
-    function exportTagReprintList() {
+    function exportTagReprintList(ctx) {
       if (assetsLoading) return alert("กำลังโหลดรายการ รอสักครู่แล้วลองใหม่ครับ");
-      const list = assets.filter(a => a.company === currentCompany && (a.tag === 'ป้ายชำรุด' || a.tag === 'ไม่มีป้าย'));
-      if (list.length === 0) return alert(`บริษัท "${currentCompany}" ไม่มีรายการที่ต้องทำป้ายใหม่ครับ`);
+      ctx = ctx || currentExportCtx();
+      const list = ctx.items.filter(a => a.tag === 'ป้ายชำรุด' || a.tag === 'ไม่มีป้าย');
+      if (list.length === 0) return alert(`"${ctx.label}" ไม่มีรายการที่ต้องทำป้ายใหม่ครับ`);
 
       const floorOf = (a) => floorKeyOf(a.location) || 'อื่นๆ';
       const byNatural = (x, y) => String(x).localeCompare(String(y), 'th', { numeric: true });
-      list.sort((a, b) =>
+      const tabIdx = (a) => ctx.tabs.indexOf(a._tab);
+      list.sort((a, b) => tabIdx(a) - tabIdx(b) ||
         ((floorOf(a) === 'อื่นๆ') - (floorOf(b) === 'อื่นๆ')) || byNatural(floorOf(a), floorOf(b)) ||
         byNatural(a.location || '-', b.location || '-') || (Number(a.id) || 0) - (Number(b.id) || 0));
 
       const rows = list.map((a, i) => ({
         "ที่": i + 1,
+        ...(ctx.multi ? { "Tab": a._tab } : {}),
         "ชั้น": floorOf(a),
         "สถานที่ตั้ง": a.location || '-',
         "เลขทะเบียนทรัพย์สิน": a.code,
@@ -3524,7 +3585,7 @@
       // สรุปจำนวนต่อชั้น
       const sum = {};
       list.forEach(a => {
-        const f = floorOf(a);
+        const f = (ctx.multi ? a._tab + ' · ' : '') + floorOf(a);
         const s = sum[f] || (sum[f] = { "ชั้น": f, "ป้ายชำรุด": 0, "ไม่มีป้าย": 0, "รวม": 0 });
         s[a.tag]++; s["รวม"]++;
       });
@@ -3534,14 +3595,14 @@
 
       const wb = XLSX.utils.book_new();
       const ws = XLSX.utils.json_to_sheet(rows);
-      ws['!cols'] = [6, 8, 28, 20, 45, 22, 12, 13, 10, 25, 12].map(w => ({ wch: w }));
+      ws['!cols'] = [6, ...(ctx.multi ? [16] : []), 8, 28, 20, 45, 22, 12, 13, 10, 25, 12].map(w => ({ wch: w }));
       ws['!autofilter'] = { ref: ws['!ref'] };
       XLSX.utils.book_append_sheet(wb, ws, "ป้ายต้องทำใหม่");
       const ws2 = XLSX.utils.json_to_sheet(summary);
-      ws2['!cols'] = [14, 12, 12, 10].map(w => ({ wch: w }));
+      ws2['!cols'] = [ctx.multi ? 26 : 14, 12, 12, 10].map(w => ({ wch: w }));
       XLSX.utils.book_append_sheet(wb, ws2, "สรุปตามชั้น");
       const today = new Date().toISOString().slice(0, 10);
-      XLSX.writeFile(wb, `ป้ายต้องทำใหม่_${String(currentCompany).replace(/[\\/:*?"<>|]/g, '_')}_${today}.xlsx`);
+      XLSX.writeFile(wb, `ป้ายต้องทำใหม่_${safeFile(ctx.label)}_${today}.xlsx`);
     }
   </script>
   <!-- โหมดทดลอง: เลือกไฟล์ backup -->
@@ -3599,35 +3660,22 @@
   <div id="signPicker" class="hidden fixed inset-0 z-[91] bg-black/50 flex items-end sm:items-center justify-center sm:p-4" onclick="if(event.target===this)closeSignPicker()">
     <div class="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col max-h-[85vh]">
       <div class="flex items-start justify-between gap-2 p-4 pb-2">
-        <div><h3 class="font-bold text-slate-900">📝 รายงานเซ็นรับรอง</h3>
-          <div class="text-[11px] text-slate-500">เลือก Tab ที่จะรวมเป็นรายงานฉบับเดียว (ข้อมูลเดิมไม่ถูกย้าย)</div></div>
+        <div><h3 id="signPickTitle" class="font-bold text-slate-900">📝 รายงานเซ็นรับรอง</h3>
+          <div class="text-[11px] text-slate-500">เลือก Tab ที่จะรวม · เลขทะเบียนซ้ำนับครั้งเดียว (ข้อมูลเดิมไม่ถูกย้าย)</div></div>
         <button onclick="closeSignPicker()" aria-label="ปิด" class="text-slate-400 hover:text-slate-700 text-lg px-2"><i class="fa-solid fa-xmark"></i></button>
       </div>
-      <div class="px-4"><label class="block text-[11px] text-slate-500 mb-1">ชื่อรายงาน</label>
+      <div id="signTitleWrap" class="px-4"><label class="block text-[11px] text-slate-500 mb-1">ชื่อรายงาน</label>
         <input id="signTitleInput" type="text" maxlength="120" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"></div>
       <div id="signPickList" class="overflow-y-auto px-2 py-2 mt-2 border-t border-slate-100"></div>
       <div class="p-4 pt-2 border-t border-slate-100 space-y-1">
         <div id="signPickInfo" class="text-[11px] text-slate-500"></div>
         <div id="signPickMsg" class="text-[11px] text-red-600"></div>
-        <button id="signPickGo" onclick="buildSignReport()" class="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold py-2.5 rounded-lg">สร้างรายงาน</button>
+        <button id="signPickGo" onclick="runPicked('sign')" class="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold py-2.5 rounded-lg">สร้างรายงาน</button>
+        <div id="pickFormatBtns" class="hidden grid grid-cols-2 gap-2">
+          <button onclick="runPicked('pdf')" class="pick-go flex items-center justify-center gap-2 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white font-bold py-2.5 rounded-lg"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+          <button onclick="runPicked('excel')" class="pick-go flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold py-2.5 rounded-lg"><i class="fa-solid fa-file-excel"></i> Excel</button>
+        </div>
       </div>
-    </div>
-  </div>
-  <!-- เลือกรูปแบบไฟล์ส่งออก -->
-  <div id="exportChooser" class="hidden fixed inset-0 z-[91] bg-black/50 flex items-end sm:items-center justify-center sm:p-4" onclick="if(event.target===this)this.classList.add('hidden')">
-    <div class="bg-white w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-2xl p-4 space-y-3">
-      <div class="flex items-start justify-between gap-2">
-        <div><h3 id="exportChooserTitle" class="font-bold text-slate-900">ส่งออก</h3><div class="text-[11px] text-slate-500" id="exportChooserSub"></div></div>
-        <button onclick="document.getElementById('exportChooser').classList.add('hidden')" aria-label="ปิด" class="text-slate-400 hover:text-slate-700 text-lg px-2"><i class="fa-solid fa-xmark"></i></button>
-      </div>
-      <button id="exportChoosePdf" class="w-full flex items-center gap-3 text-left border border-slate-200 hover:border-rose-300 hover:bg-rose-50 rounded-xl p-3">
-        <i class="fa-solid fa-file-pdf text-2xl text-rose-600 w-8 text-center"></i>
-        <span><b class="text-slate-900">PDF</b><span class="block text-xs text-slate-500">แนบส่งได้เลย เปิดดูได้ทุกเครื่อง แก้ไขไม่ได้</span></span>
-      </button>
-      <button id="exportChooseExcel" class="w-full flex items-center gap-3 text-left border border-slate-200 hover:border-emerald-300 hover:bg-emerald-50 rounded-xl p-3">
-        <i class="fa-solid fa-file-excel text-2xl text-emerald-600 w-8 text-center"></i>
-        <span><b class="text-slate-900">Excel</b><span class="block text-xs text-slate-500">เอาไปกรอง คำนวณ หรือแก้ไขต่อ</span></span>
-      </button>
     </div>
   </div>
   <!-- รายงานผลการตรวจนับ สำหรับเซ็นรับรอง -->
