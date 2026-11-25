@@ -814,6 +814,46 @@
       return batch.commit();
     }
 
+    // บันทึกทีละชุด: Firestore รับได้ไม่เกิน 500 การเขียนต่อ batch
+    // items = รายการที่จะทำ, addToBatch(batch, item) ใส่การเขียนของ 1 รายการ (ไม่เกิน writesPerItem)
+    // การเขียนของรายการเดียวกันอยู่ใน batch เดียวเสมอ จึงไม่มีรายการที่ทำไปครึ่งๆ กลางๆ
+    async function commitInChunks(items, addToBatch, label, writesPerItem = 1) {
+      const per = Math.max(1, Math.floor(400 / writesPerItem));
+      let done = 0;
+      try {
+        for (let i = 0; i < items.length; i += per) {
+          const chunk = items.slice(i, i + per);
+          showProgress(`${label} ${done}/${items.length}...`);
+          const batch = db.batch();
+          chunk.forEach(item => addToBatch(batch, item));
+          await batch.commit();
+          done += chunk.length;
+        }
+      } catch (err) {
+        err.doneCount = done;
+        throw err;
+      } finally {
+        hideProgress();
+      }
+      return done;
+    }
+
+    function showProgress(text) {
+      let el = document.getElementById('progressToast');
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'progressToast';
+        el.className = 'fixed top-4 left-1/2 -translate-x-1/2 z-[100] bg-slate-900 text-white text-sm px-4 py-2 rounded-lg shadow-xl flex items-center gap-2';
+        document.body.appendChild(el);
+      }
+      el.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> <span></span>`;
+      el.querySelector('span').innerText = text;
+    }
+    function hideProgress() {
+      const el = document.getElementById('progressToast');
+      if (el) el.remove();
+    }
+
     // ลบรูปของรายการ (ใช้ตอนลบถาวรจากถังขยะ)
     async function deleteImagesOfAssets(assetIds) {
       for (let i = 0; i < assetIds.length; i += 30) {
@@ -1250,14 +1290,13 @@
 
     function emptyImageTrash() {
       if (!confirm("⚠️ คำเตือน: ต้องการล้างรูปถ่ายในถังขยะทั้งหมดถาวรใช่หรือไม่?")) return;
-      const batch = db.batch();
-      imageTrash.forEach(item => {
+      commitInChunks(imageTrash.slice(), (batch, item) => {
         batch.delete(db.collection("skyai_image_trash_v9").doc(item.trashImgId));
-      });
-      batch.commit().then(() => {
+      }, 'กำลังล้างถังขยะรูป').then(() => {
         alert("ล้างถังขยะรูปถ่ายเรียบร้อยแล้ว");
         closeImageTrashModal();
-      });
+        refreshTrashCounts();
+      }).catch(err => alert("ล้างถังขยะรูปไม่สำเร็จ: " + err.message));
     }
 
     // --- ลบทีละรายการ: ย้ายไปถังขยะ (กู้คืนได้) ไม่ได้ลบถาวร ---
@@ -1379,9 +1418,8 @@
       if (!confirm(`ต้องการกู้คืนข้อมูลบริษัท "${compName}" พร้อมรูปถ่ายทั้งหมดกลับมาใช่หรือไม่?`)) return;
       // กู้คืนเฉพาะที่ถูกลบมาทั้ง Tab ส่วนรายการที่ลบทีละรายการ กู้คืนแยกเอง
       const itemsToRestore = trashAssets.filter(item => item.company === compName && item.trashType !== 'item');
-      const batch = db.batch();
 
-      itemsToRestore.forEach(item => {
+      commitInChunks(itemsToRestore, (batch, item) => {
         const originalDocId = item.originalDocId || `asset_${item.company}_${item.id}_${Date.now()}`;
         const mainRef = db.collection("skyai_assets_v9_clean").doc(originalDocId);
         const trashRef = db.collection("skyai_trash_v9").doc(item.trashId);
@@ -1393,14 +1431,16 @@
 
         batch.set(mainRef, restoreData);
         batch.delete(trashRef);
-      });
-
-      batch.commit().then(() => {
+      }, 'กำลังกู้คืน', 2).then(() => {
         alert(`กู้คืนบริษัท "${compName}" และรูปถ่ายทั้งหมดสำเร็จเรียบร้อย!`);
         addCompanyName(compName);
         switchCompany(compName);
         closeTrashModal();
-      }).catch(err => alert("กู้คืนไม่สำเร็จ: " + err.message));
+      }).catch(err => {
+        if (err.doneCount > 0) addCompanyName(compName); // ส่วนที่กู้แล้วต้องมี Tab ให้เห็น
+        alert(`กู้คืนไม่สำเร็จ: ${err.message}\n\nกู้คืนไปแล้ว ${err.doneCount || 0} จาก ${itemsToRestore.length} รายการ ` +
+          `ที่เหลือยังอยู่ในถังขยะ กดกู้คืนอีกครั้งเพื่อทำต่อได้`);
+      });
     }
 
     // ลบเอกสารในถังขยะทีละชุด (Firestore batch รับได้ไม่เกิน 500 รายการต่อครั้ง)
@@ -1475,15 +1515,13 @@
 
       if (!confirm(`⚠️ ยืนยันการลบ Tab บริษัท "${currentCompany}" (${companyAssets.length} รายการ) ไปยังถังขยะ?`)) return;
 
-      const batch = db.batch();
-      companyAssets.forEach(item => {
+      const deletedAt = new Date().toISOString();
+      commitInChunks(companyAssets, (batch, item) => {
         const mainRef = db.collection("skyai_assets_v9_clean").doc(item.docId);
         const trashRef = db.collection("skyai_trash_v9").doc();
-        batch.set(trashRef, { ...item, originalDocId: item.docId, deletedAt: new Date().toISOString() });
+        batch.set(trashRef, { ...item, originalDocId: item.docId, deletedAt });
         batch.delete(mainRef);
-      });
-
-      batch.commit().then(() => {
+      }, 'กำลังย้ายไปถังขยะ', 2).then(() => {
         refreshTrashCounts();
         const deleted = currentCompany;
         delete companyMetadata[deleted];
@@ -1491,7 +1529,11 @@
         removeCompanyName(deleted);
         const remaining = companyNames.filter(c => c !== deleted);
         switchCompany(remaining.length > 0 ? remaining[0] : 'SKYAI');
-      }).catch(err => alert("ลบไม่สำเร็จ: " + err.message));
+      }).catch(err => {
+        refreshTrashCounts();
+        alert(`ลบไม่สำเร็จ: ${err.message}\n\nย้ายไปถังขยะแล้ว ${err.doneCount || 0} จาก ${companyAssets.length} รายการ ` +
+          `ที่เหลือยังอยู่ใน Tab นี้ กดลบ Tab อีกครั้งเพื่อทำต่อได้`);
+      });
     }
 
     // --- HYPER SPEED SCANNER ---
@@ -1804,7 +1846,7 @@
 
           let companyName = file.name.replace(/\.[^/.]+$/, "").trim();
           let importedCount = 0;
-          const batch = db.batch();
+          const rowsToSave = [];
           const baseTime = Date.now();
 
           for (let i = 0; i < jsonData.length; i++) {
@@ -1823,8 +1865,7 @@
             }
 
             importedCount++;
-            const docRef = db.collection("skyai_assets_v9_clean").doc(`asset_${companyName}_${importedCount}_${baseTime}_${i}`);
-            batch.set(docRef, {
+            rowsToSave.push({ docId: `asset_${companyName}_${importedCount}_${baseTime}_${i}`, data: {
               id: importedCount,
               company: companyName,
               category: col1,
@@ -1837,18 +1878,23 @@
               imageCount: 0,
               remark: '',
               auditType: 'สุ่ม'
-            });
+            } });
           }
 
           if (importedCount > 0) {
-            batch.commit().then(() => {
+            commitInChunks(rowsToSave, (batch, row) => {
+              batch.set(db.collection("skyai_assets_v9_clean").doc(row.docId), row.data);
+            }, 'กำลังนำเข้า').then(() => {
               companyMetadata[companyName] = { inspector: "", date: "" };
               localStorage.setItem('skyai_meta', JSON.stringify(companyMetadata));
               alert(`นำเข้าข้อมูลบริษัท "${companyName}" สำเร็จทั้งหมด ${importedCount} รายการครบถ้วน!`);
               addCompanyName(companyName);
               switchCompany(companyName);
             }).catch(err => {
-              alert("บันทึกลงฐานข้อมูลไม่สำเร็จ: " + err.message);
+              const done = err.doneCount || 0;
+              if (done > 0) { addCompanyName(companyName); switchCompany(companyName); }
+              alert(`บันทึกลงฐานข้อมูลไม่สำเร็จ: ${err.message}\n\nบันทึกไปแล้ว ${done} จาก ${importedCount} รายการ` +
+                (done > 0 ? `\nแนะนำ: ลบ Tab "${companyName}" แล้วนำเข้าไฟล์ใหม่อีกครั้ง เพื่อไม่ให้รายการซ้ำ` : ''));
             });
           } else {
             alert("ไม่พบข้อมูลรหัสทะเบียนทรัพย์สินในไฟล์ กรุณาตรวจสอบรูปแบบคอลัมน์");
