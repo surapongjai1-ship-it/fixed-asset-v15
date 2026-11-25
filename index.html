@@ -75,6 +75,9 @@
       <button onclick="closeMobileMenu(); exportToExcelClean()" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
         <i class="fa-solid fa-file-excel w-5 text-center text-emerald-400"></i> ส่งออก Excel
       </button>
+      <button onclick="closeMobileMenu(); exportTagReprintList()" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
+        <i class="fa-solid fa-tags w-5 text-center text-orange-400"></i> ส่งออกรายการป้ายต้องทำใหม่
+      </button>
       <button onclick="closeMobileMenu(); downloadAllImagesZip()" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
         <i class="fa-solid fa-file-zipper w-5 text-center text-violet-400"></i> โหลดรูปทั้งหมด (.zip)
       </button>
@@ -2167,7 +2170,7 @@
           link(tagFilter === 'ไม่มีป้าย', `setTagFilter('${tagFilter === 'ไม่มีป้าย' ? '' : 'ไม่มีป้าย'}')`, `ไม่มีป้าย <b>${tagMissing}</b>`)
         : '<span class="text-slate-500 px-1.5">ครบทุกรายการ ✓</span>';
       document.getElementById('dashExtras').innerHTML = `
-        <div class="flex items-center flex-wrap gap-0.5"><span class="text-slate-500 w-16 shrink-0">🏷️ ป้าย</span>${tagLine}</div>
+        <div class="flex items-center flex-wrap gap-0.5"><span class="text-slate-500 w-16 shrink-0">🏷️ ป้าย</span>${tagLine}${(tagBroken || tagMissing) ? `<button onclick="exportTagReprintList()" title="ส่งออกรายการป้ายต้องทำใหม่เป็น Excel" class="ml-auto text-emerald-700 hover:bg-emerald-50 px-1.5 py-0.5 rounded"><i class="fa-solid fa-file-excel"></i> Excel</button>` : ''}</div>
         <div class="flex items-center flex-wrap gap-0.5"><span class="text-slate-500 w-16 shrink-0">📋 อื่นๆ</span>${
           link(currentFilter === 'สุ่ม', `filterStatus('${currentFilter === 'สุ่ม' ? 'all' : 'สุ่ม'}'); goToList()`, `🎯 สุ่ม <b>${sampled}</b>`)}<span class="text-slate-300">·</span>${
           link(currentFilter === 'นอกสุ่ม', `filterStatus('${currentFilter === 'นอกสุ่ม' ? 'all' : 'นอกสุ่ม'}'); goToList()`, `➕ เพิ่มใหม่ <b>${extra}</b>`)}<span class="text-slate-300">·</span>${
@@ -2652,6 +2655,56 @@
       const ws = XLSX.utils.json_to_sheet(excelData);
       XLSX.utils.book_append_sheet(wb, ws, "รายงานตรวจนับ");
       XLSX.writeFile(wb, `รายงานตรวจนับ_${currentCompany}${meta.date ? "_" + meta.date : ""}.xlsx`);
+    }
+
+    // ส่งออกรายการป้ายต้องทำใหม่ (ป้ายชำรุด + ไม่มีป้าย) ของบริษัทที่เปิดอยู่ เรียงตามชั้น/สถานที่ ไว้ส่งคนพิมพ์ป้าย
+    // ใช้ข้อมูลที่โหลดไว้แล้ว ไม่อ่านฐานข้อมูลเพิ่ม
+    function exportTagReprintList() {
+      if (assetsLoading) return alert("กำลังโหลดรายการ รอสักครู่แล้วลองใหม่ครับ");
+      const list = assets.filter(a => a.company === currentCompany && (a.tag === 'ป้ายชำรุด' || a.tag === 'ไม่มีป้าย'));
+      if (list.length === 0) return alert(`บริษัท "${currentCompany}" ไม่มีรายการที่ต้องทำป้ายใหม่ครับ`);
+
+      const floorOf = (a) => floorKeyOf(a.location) || 'อื่นๆ';
+      const byNatural = (x, y) => String(x).localeCompare(String(y), 'th', { numeric: true });
+      list.sort((a, b) =>
+        ((floorOf(a) === 'อื่นๆ') - (floorOf(b) === 'อื่นๆ')) || byNatural(floorOf(a), floorOf(b)) ||
+        byNatural(a.location || '-', b.location || '-') || (Number(a.id) || 0) - (Number(b.id) || 0));
+
+      const rows = list.map((a, i) => ({
+        "ที่": i + 1,
+        "ชั้น": floorOf(a),
+        "สถานที่ตั้ง": a.location || '-',
+        "เลขทะเบียนทรัพย์สิน": a.code,
+        "ชื่อทรัพย์สิน": a.name,
+        "ประเภทสินทรัพย์": a.category || '',
+        "สถานะป้าย": a.tag,
+        "สภาพทรัพย์สิน": a.status || 'ยังไม่ตรวจ',
+        "ลำดับในระบบ": a.id || '',
+        "หมายเหตุ": a.remark || '',
+        "ติดป้ายแล้ว ✓": ''
+      }));
+
+      // สรุปจำนวนต่อชั้น
+      const sum = {};
+      list.forEach(a => {
+        const f = floorOf(a);
+        const s = sum[f] || (sum[f] = { "ชั้น": f, "ป้ายชำรุด": 0, "ไม่มีป้าย": 0, "รวม": 0 });
+        s[a.tag]++; s["รวม"]++;
+      });
+      const summary = Object.values(sum);
+      summary.push({ "ชั้น": "รวมทั้งหมด", "ป้ายชำรุด": summary.reduce((t, s) => t + s["ป้ายชำรุด"], 0),
+        "ไม่มีป้าย": summary.reduce((t, s) => t + s["ไม่มีป้าย"], 0), "รวม": list.length });
+
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(rows);
+      ws['!cols'] = [6, 8, 28, 20, 45, 22, 12, 13, 10, 25, 12].map(w => ({ wch: w }));
+      ws['!autofilter'] = { ref: ws['!ref'] };
+      XLSX.utils.book_append_sheet(wb, ws, "ป้ายต้องทำใหม่");
+      const ws2 = XLSX.utils.json_to_sheet(summary);
+      ws2['!cols'] = [14, 12, 12, 10].map(w => ({ wch: w }));
+      XLSX.utils.book_append_sheet(wb, ws2, "สรุปตามชั้น");
+      const today = new Date().toISOString().slice(0, 10);
+      XLSX.writeFile(wb, `ป้ายต้องทำใหม่_${String(currentCompany).replace(/[\\/:*?"<>|]/g, '_')}_${today}.xlsx`);
     }
   </script>
   <!-- Dashboard ผู้บริหาร (หน้าเต็มจอ) -->
