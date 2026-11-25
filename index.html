@@ -561,7 +561,7 @@
         const m = col(colName);
         const exists = m.has(id);
         const data = exists ? clone(m.get(id)) : undefined;
-        return { id, exists, ref: docRef(colName, id), data: () => (data ? clone(data) : undefined) };
+        return { id, exists, ref: docRef(colName, id), metadata: { hasPendingWrites: false, fromCache: false }, data: () => (data ? clone(data) : undefined) };
       }
       function runQuery(q) {
         const out = [];
@@ -570,7 +570,7 @@
           if (q.lim && out.length >= q.lim) break;
         }
         const docs = out.map(id => docSnap(q.col, id));
-        return { docs, size: docs.length, empty: docs.length === 0, forEach: (fn) => docs.forEach(fn) };
+        return { docs, size: docs.length, empty: docs.length === 0, metadata: { hasPendingWrites: false, fromCache: false }, forEach: (fn) => docs.forEach(fn) };
       }
       function notify(colName) {
         setTimeout(() => {
@@ -594,7 +594,8 @@
           where: (f, op, v) => query(colName, [...conds, { f, op, v }], lim),
           limit: (n) => query(colName, conds, n),
           get: () => tick(() => runQuery(q)),
-          onSnapshot: (cb) => listen({ kind: 'query', col: colName, q }, cb),
+          // รองรับทั้ง onSnapshot(cb) และ onSnapshot(options, cb)
+          onSnapshot: (a, b) => listen({ kind: 'query', col: colName, q }, typeof a === 'function' ? a : b),
           _q: q,
         };
       }
@@ -621,7 +622,7 @@
           update: (data) => commit([W.update(colName, id, data)]),
           delete: () => commit([W.delete(colName, id)]),
           get: () => tick(() => docSnap(colName, id)),
-          onSnapshot: (cb) => listen({ kind: 'doc', col: colName, id }, cb),
+          onSnapshot: (a, b) => listen({ kind: 'doc', col: colName, id }, typeof a === 'function' ? a : b),
           _c: colName,
         };
       }
@@ -666,6 +667,12 @@
 
     if (!DEMO) firebase.initializeApp(firebaseConfig);
     const db = DEMO ? demoStore.db : firebase.firestore();
+    // เก็บข้อมูลไว้ในเครื่อง: เปิดแอปซ้ำไม่ต้องโหลดใหม่ทั้งหมด และกดบันทึกได้ตอนไม่มีเน็ต (ส่งให้เองเมื่อเน็ตกลับมา)
+    // synchronizeTabs: เปิดหลายแท็บพร้อมกันได้ · ถ้าเบราว์เซอร์ไม่รองรับ แอปยังทำงานแบบออนไลน์ตามปกติ
+    if (!DEMO) {
+      db.enablePersistence({ synchronizeTabs: true })
+        .catch(err => console.warn('เปิดโหมดออฟไลน์ไม่ได้ (ใช้แบบออนไลน์ตามปกติ):', err.code || err.message));
+    }
 
     let assets = [];
     let trashAssets = [];
@@ -1066,8 +1073,11 @@
       if (assetsUnsub) { assetsUnsub(); assetsUnsub = null; }
       assets = [];
       assetsLoading = true;
-      assetsUnsub = db.collection(ASSETS_COL).where('company', '==', company).onSnapshot((snapshot) => {
+      assetsUnsub = db.collection(ASSETS_COL).where('company', '==', company).onSnapshot({ includeMetadataChanges: true }, (snapshot) => {
         if (company !== currentCompany) return;
+        pendingWrites = snapshot.docs.filter(d => d.metadata && d.metadata.hasPendingWrites).length;
+        fromCache = !!(snapshot.metadata && snapshot.metadata.fromCache);
+        syncOfflineBar();
         assets = [];
         snapshot.forEach((doc) => assets.push(normalizeAsset(doc)));
         assets.sort((a, b) => a.id - b.id);
@@ -1082,6 +1092,39 @@
         updateDashboard();
       }, (err) => showAssetsError(err));
     }
+
+    // --- สถานะออฟไลน์ / รอส่ง ---
+    let pendingWrites = 0, fromCache = false;
+    function syncOfflineBar() {
+      const bar = document.getElementById('offlineBar');
+      if (!bar) return;
+      const offline = !navigator.onLine;
+      let text = '';
+      if (offline) text = pendingWrites ? `📴 ออฟไลน์ · รอส่ง ${pendingWrites} รายการ (อย่าเพิ่งปิดแอป)` : '📴 ออฟไลน์ · ใช้ข้อมูลที่เก็บในเครื่อง กดบันทึกได้ตามปกติ';
+      else if (pendingWrites) text = `⏳ กำลังส่งข้อมูล ${pendingWrites} รายการ...`;
+      bar.innerText = text;
+      bar.classList.toggle('hidden', !text);
+      bar.classList.toggle('bg-slate-800', offline);
+      bar.classList.toggle('bg-blue-600', !offline);
+    }
+    window.addEventListener('online', syncOfflineBar);
+    window.addEventListener('offline', syncOfflineBar);
+
+    // ข้อความสั้นๆ ที่หายไปเอง (ใช้แทน alert ตอนบันทึกสำเร็จ เพราะออฟไลน์จะไม่มีการตอบกลับจากเซิร์ฟเวอร์)
+    function showToast(text) {
+      let el = document.getElementById('toastMsg');
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'toastMsg';
+        el.className = 'fixed bottom-24 left-1/2 -translate-x-1/2 z-[100] bg-slate-900 text-white text-sm px-4 py-2 rounded-lg shadow-xl transition-opacity';
+        document.body.appendChild(el);
+      }
+      el.innerText = text;
+      el.style.opacity = '1';
+      clearTimeout(showToast.t);
+      showToast.t = setTimeout(() => { el.style.opacity = '0'; }, 1800);
+    }
+    const savedMsg = (what) => navigator.onLine ? `${what}แล้ว` : `${what}ในเครื่องแล้ว · จะส่งเมื่อมีเน็ต`;
 
     function showAssetsError(err) {
       const quota = err && (err.code === 'resource-exhausted' || /quota/i.test(err.message || ''));
@@ -1152,6 +1195,7 @@
     // items = รายการที่จะทำ, addToBatch(batch, item) ใส่การเขียนของ 1 รายการ (ไม่เกิน writesPerItem)
     // การเขียนของรายการเดียวกันอยู่ใน batch เดียวเสมอ จึงไม่มีรายการที่ทำไปครึ่งๆ กลางๆ
     async function commitInChunks(items, addToBatch, label, writesPerItem = 1) {
+      if (!DEMO && !navigator.onLine) throw new Error('ต้องต่ออินเทอร์เน็ตก่อน (งานนี้ทำตอนออฟไลน์ไม่ได้)');
       const per = Math.max(1, Math.floor(400 / writesPerItem));
       let done = 0;
       try {
@@ -1359,9 +1403,10 @@
         checkedAt: FieldValueImpl.serverTimestamp(),
         history: [historyEntry('add', '', statusVal, inspector)],
         createdAt: new Date().toISOString()
-      }).then(() => extraImages.length ? addImagesToAsset(extraAsset, extraImages) : null).then(() => {
-        closeAddExtraModal();
       }).catch(err => alert("บันทึกรายการไม่สำเร็จ: " + err.message));
+      if (extraImages.length) addImagesToAsset(extraAsset, extraImages).catch(err => alert("บันทึกรูปไม่สำเร็จ: " + err.message));
+      closeAddExtraModal();
+      showToast(savedMsg('เพิ่มรายการ'));
     }
 
     // --- ระบบจัดการกล่องกรอง Location แบบ Excel (Keyword + ติ๊กหลายอัน + Clear) ---
@@ -2180,9 +2225,9 @@
           ...(scannedPrev.tag !== tagVal ? [historyEntry('tag', scannedPrev.tag, tagVal, name)] : []),
           ...((scannedPrev.status === status && scannedPrev.tag === tagVal) ? [historyEntry('status', status, status, name)] : [])
         )
-      }).then(() => {
-        closeQuickPopup();
       }).catch(err => alert("บันทึกไม่สำเร็จ: " + err.message));
+      closeQuickPopup();
+      showToast(savedMsg('บันทึก'));
     }
 
     async function quickAttachImage(event) {
@@ -2207,9 +2252,9 @@
           canvas.width = width; canvas.height = height;
           canvas.getContext('2d').drawImage(img, 0, 0, width, height);
 
-          addImagesToAsset(target, [canvas.toDataURL('image/jpeg', 0.65)]).then(() => {
-            alert("บันทึกรูปถ่ายด่วนสำเร็จ!");
-          }).catch(err => alert("บันทึกรูปไม่สำเร็จ: " + err.message));
+          addImagesToAsset(target, [canvas.toDataURL('image/jpeg', 0.65)])
+            .catch(err => alert("บันทึกรูปไม่สำเร็จ: " + err.message));
+          showToast(savedMsg('บันทึกรูป'));
         };
         img.src = e.target.result;
       };
@@ -3160,6 +3205,8 @@
       <div id="historyList" class="overflow-y-auto px-2 pb-4"></div>
     </div>
   </div>
+  <!-- แถบสถานะออฟไลน์ / รอส่ง -->
+  <div id="offlineBar" class="hidden fixed top-0 inset-x-0 z-[97] text-white text-xs font-bold text-center py-1 shadow"></div>
   <!-- ถามชื่อผู้ตรวจ (ครั้งแรกของเครื่อง) -->
   <div id="inspectorModal" class="hidden fixed inset-0 z-[95] bg-black/50 flex items-center justify-center p-4">
     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-5 space-y-3">
