@@ -100,6 +100,9 @@
       <button onclick="closeMobileMenu(); renameCurrentCompany()" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
         <i class="fa-solid fa-pen-to-square w-5 text-center text-slate-300"></i> เปลี่ยนชื่อ Tab บริษัทนี้
       </button>
+      <button onclick="closeMobileMenu(); DEMO ? (location.href = location.pathname) : window.open(location.pathname + '?demo', '_blank')" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
+        <i class="fa-solid fa-flask w-5 text-center text-orange-400"></i> <span data-demo-label>โหมดทดลอง (ข้อมูลจาก backup)</span>
+      </button>
       <button onclick="closeMobileMenu(); confirmDeleteCurrentCompany()" class="w-full flex items-center gap-3 px-2 py-3 mt-1 rounded-lg hover:bg-slate-800 text-left text-red-400 border-t border-slate-700">
         <i class="fa-solid fa-triangle-exclamation w-5 text-center"></i> ลบบริษัทนี้ (ย้ายไปถังขยะ)
       </button>
@@ -489,8 +492,177 @@
       measurementId: "G-V0H508NTSH"
     };
 
-    firebase.initializeApp(firebaseConfig);
-    const db = firebase.firestore();
+    // ===================== โหมดทดลอง (?demo) =====================
+    // ใช้ข้อมูลจากไฟล์ backup ที่ผู้ใช้เลือกจากเครื่อง ทำงานในหน่วยความจำของเบราว์เซอร์อย่างเดียว
+    // ไม่เชื่อมต่อ Firebase เลย · ปิด/รีเฟรชหน้าแล้วทุกอย่างหายไป
+    const DEMO = new URLSearchParams(location.search).has('demo');
+
+    function createDemoStore() {
+      const cols = new Map();                       // ชื่อคอลเลกชัน → Map(id → data)
+      const listeners = new Set();                  // { kind:'query'|'doc', ... , cb }
+      const col = (name) => cols.get(name) || (cols.set(name, new Map()), cols.get(name));
+      let autoId = 0;
+      const newId = () => 'demo_' + Date.now().toString(36) + '_' + (autoId++).toString(36);
+      const tick = (fn) => new Promise((res, rej) => setTimeout(() => { try { res(fn()); } catch (e) { rej(e); } }, 15));
+
+      // --- เวลา (เลียนแบบ Firestore Timestamp) ---
+      class DemoTimestamp {
+        constructor(ms) { this._ms = ms; }
+        toDate() { return new Date(this._ms); }
+        toMillis() { return this._ms; }
+        static fromDate(d) { return new DemoTimestamp(d.getTime()); }
+        static now() { return new DemoTimestamp(Date.now()); }
+      }
+      // --- ค่าพิเศษ (FieldValue) ---
+      const S = (op, v) => ({ __demoOp: op, v });
+      const FieldValue = {
+        delete: () => S('delete'), serverTimestamp: () => S('ts'),
+        increment: (n) => S('inc', n), arrayUnion: (...a) => S('union', a), arrayRemove: (...a) => S('remove', a),
+      };
+      const clone = (v) => (v instanceof DemoTimestamp) ? v
+        : Array.isArray(v) ? v.map(clone)
+        : (v && typeof v === 'object') ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, clone(x)])) : v;
+      function applyData(target, data) {
+        for (const [k, v] of Object.entries(data)) {
+          if (v && v.__demoOp) {
+            const cur = target[k];
+            if (v.__demoOp === 'delete') delete target[k];
+            else if (v.__demoOp === 'ts') target[k] = DemoTimestamp.now();
+            else if (v.__demoOp === 'inc') target[k] = (Number(cur) || 0) + v.v;
+            else if (v.__demoOp === 'union') target[k] = [...(Array.isArray(cur) ? cur : []), ...v.v.filter(x => !(cur || []).includes(x))];
+            else if (v.__demoOp === 'remove') target[k] = (Array.isArray(cur) ? cur : []).filter(x => !v.v.includes(x));
+          } else target[k] = clone(v);
+        }
+        return target;
+      }
+
+      // --- เงื่อนไขค้นหา ---
+      const cmpVal = (v) => (v instanceof DemoTimestamp) ? v.toMillis() : v;
+      function match(data, conds) {
+        return conds.every(({ f, op, v }) => {
+          const x = cmpVal(data[f]), y = cmpVal(v);
+          if (op === '==') return x === y;
+          if (op === 'in') return Array.isArray(v) && v.some(z => cmpVal(z) === x);
+          if (x === undefined || x === null) return false;
+          if (op === '>=') return x >= y;
+          if (op === '>') return x > y;
+          if (op === '<=') return x <= y;
+          if (op === '<') return x < y;
+          if (op === '!=') return x !== y;
+          throw new Error('demo: ไม่รองรับเงื่อนไข ' + op);
+        });
+      }
+
+      // --- snapshot ---
+      function docSnap(colName, id) {
+        const m = col(colName);
+        const exists = m.has(id);
+        const data = exists ? clone(m.get(id)) : undefined;
+        return { id, exists, ref: docRef(colName, id), data: () => (data ? clone(data) : undefined) };
+      }
+      function runQuery(q) {
+        const out = [];
+        for (const [id, data] of col(q.col)) {
+          if (match(data, q.conds)) out.push(id);
+          if (q.lim && out.length >= q.lim) break;
+        }
+        const docs = out.map(id => docSnap(q.col, id));
+        return { docs, size: docs.length, empty: docs.length === 0, forEach: (fn) => docs.forEach(fn) };
+      }
+      function notify(colName) {
+        setTimeout(() => {
+          for (const l of listeners) {
+            if (l.col !== colName) continue;
+            try { l.cb(l.kind === 'doc' ? docSnap(l.col, l.id) : runQuery(l.q)); } catch (e) { console.error(e); }
+          }
+        }, 0);
+      }
+      function listen(entry, cb) {
+        const l = { ...entry, cb };
+        listeners.add(l);
+        setTimeout(() => cb(l.kind === 'doc' ? docSnap(l.col, l.id) : runQuery(l.q)), 30);
+        return () => listeners.delete(l);
+      }
+
+      // --- refs (รูปแบบเดียวกับ compat SDK) ---
+      function query(colName, conds = [], lim = 0) {
+        const q = { col: colName, conds, lim };
+        return {
+          where: (f, op, v) => query(colName, [...conds, { f, op, v }], lim),
+          limit: (n) => query(colName, conds, n),
+          get: () => tick(() => runQuery(q)),
+          onSnapshot: (cb) => listen({ kind: 'query', col: colName, q }, cb),
+          _q: q,
+        };
+      }
+      // การเขียนแต่ละแบบ: ตรวจก่อน (validate) แล้วค่อยทำ (apply) — batch จะได้ all-or-nothing
+      const W = {
+        set: (c, id, data, opts) => ({ validate() {}, apply() {
+          const m = col(c);
+          m.set(id, applyData(opts && opts.merge && m.has(id) ? m.get(id) : {}, data)); return c; } }),
+        update: (c, id, data) => ({ validate() { if (!col(c).has(id)) throw new Error(`No document to update: ${c}/${id}`); },
+          apply() { applyData(col(c).get(id), data); return c; } }),
+        delete: (c, id) => ({ validate() {}, apply() { col(c).delete(id); return c; } }),
+      };
+      function commit(ops) {
+        return tick(() => {
+          ops.forEach(o => o.validate());
+          const touched = new Set(ops.map(o => o.apply()));
+          touched.forEach(notify);
+        });
+      }
+      function docRef(colName, id) {
+        return {
+          id,
+          set: (data, opts) => commit([W.set(colName, id, data, opts)]),
+          update: (data) => commit([W.update(colName, id, data)]),
+          delete: () => commit([W.delete(colName, id)]),
+          get: () => tick(() => docSnap(colName, id)),
+          onSnapshot: (cb) => listen({ kind: 'doc', col: colName, id }, cb),
+          _c: colName,
+        };
+      }
+      const db = {
+        collection: (name) => Object.assign(query(name), {
+          doc: (id) => docRef(name, id || newId()),
+          add: (data) => { const id = newId(); return commit([W.set(name, id, data)]).then(() => docRef(name, id)); },
+        }),
+        batch: () => {
+          const ops = [];
+          return {
+            set: (ref, data, opts) => ops.push(W.set(ref._c, ref.id, data, opts)),
+            update: (ref, data) => ops.push(W.update(ref._c, ref.id, data)),
+            delete: (ref) => ops.push(W.delete(ref._c, ref.id)),
+            commit: () => commit(ops),
+          };
+        },
+      };
+
+      // --- แบบ modular ที่ใช้ในส่วนนับจำนวน / Dashboard ---
+      const fsMod = {
+        collection: (_db, name) => ({ col: name }),
+        where: (f, op, v) => ({ where: { f, op, v } }),
+        limit: (n) => ({ limit: n }),
+        query: (c, ...parts) => ({ col: c.col, conds: parts.filter(p => p.where).map(p => p.where), lim: (parts.find(p => p.limit) || {}).limit || 0 }),
+        getCountFromServer: (q) => tick(() => { const n = runQuery({ ...(q.conds ? q : { col: q.col, conds: [] }), lim: 0 }).size; return { data: () => ({ count: n }) }; }),
+        getDocs: (q) => tick(() => runQuery(q.conds ? q : { col: q.col, conds: [], lim: 0 })),
+        Timestamp: DemoTimestamp,
+      };
+
+      // --- โหลดข้อมูลจากไฟล์ backup (รูปแบบ [{ id, data }]) ---
+      function load(colName, docs) {
+        const m = col(colName);
+        docs.forEach(d => m.set(d.id, clone(d.data || {})));
+      }
+      const count = (colName) => col(colName).size;
+      return { db, fsMod, FieldValue, load, count };
+    }
+
+    const demoStore = DEMO ? createDemoStore() : null;
+    const FieldValueImpl = DEMO ? demoStore.FieldValue : firebase.firestore.FieldValue;
+
+    if (!DEMO) firebase.initializeApp(firebaseConfig);
+    const db = DEMO ? demoStore.db : firebase.firestore();
 
     let assets = [];
     let trashAssets = [];
@@ -554,9 +726,44 @@
       renderList();
     }
 
+    let demoReady = false;
+    const DEMO_COLLECTIONS = ['skyai_assets_v9_clean', 'skyai_trash_v9', 'skyai_image_trash_v9', 'skyai_asset_images_v1', 'skyai_meta'];
+    async function loadDemoFiles(fileList) {
+      const msg = document.getElementById('demoPickerMsg');
+      const files = [...fileList].filter(f => DEMO_COLLECTIONS.includes(f.name.replace(/\.json$/i, '')));
+      if (!files.some(f => f.name.startsWith('skyai_assets_v9_clean'))) {
+        msg.innerText = 'ต้องมีไฟล์ skyai_assets_v9_clean.json อย่างน้อย 1 ไฟล์ (อยู่ในโฟลเดอร์ backup)';
+        return;
+      }
+      msg.innerText = 'กำลังอ่านไฟล์...';
+      try {
+        const counts = [];
+        for (const f of files) {
+          const name = f.name.replace(/\.json$/i, '');
+          const docs = JSON.parse(await f.text());
+          if (!Array.isArray(docs)) throw new Error(f.name + ' ไม่ใช่ไฟล์ backup');
+          demoStore.load(name, docs);
+          counts.push(`${name}: ${docs.length}`);
+        }
+        // ไม่มีไฟล์ skyai_meta → สร้างรายชื่อบริษัทจากรายการ
+        if (!files.some(f => f.name.startsWith('skyai_meta'))) {
+          const all = (await db.collection(ASSETS_COL).get()).docs.map(d => d.data().company).filter(Boolean);
+          await db.collection('skyai_meta').doc('companies').set({ names: [...new Set(all)] });
+        }
+        console.log('demo loaded', counts);
+        demoReady = true;
+        document.getElementById('demoPicker').classList.add('hidden');
+        document.getElementById('demoBanner').classList.remove('hidden');
+        window.onload();
+      } catch (err) {
+        msg.innerText = 'อ่านไฟล์ไม่สำเร็จ: ' + err.message;
+      }
+    }
     window.onload = function() {
+      if (DEMO && !demoReady) { document.getElementById('demoPicker').classList.remove('hidden'); return; }
       syncLocationFilterLabel();
       syncInspectorLabel();
+      if (DEMO) document.querySelectorAll('[data-demo-label]').forEach(el => { el.innerText = 'ออกจากโหมดทดลอง'; });
       if (!getInspectorName()) setTimeout(askInspectorName, 600);
 
       const savedMeta = localStorage.getItem('skyai_meta');
@@ -590,6 +797,7 @@
     // แอปใช้ Firebase แบบ compat ซึ่งนับจำนวนฝั่งเซิร์ฟเวอร์ไม่ได้
     // จึงโหลด Firestore แบบ modular รุ่นเดียวกัน (9.22.0) แยกเป็นแอปชื่อ "counter" ไว้ใช้นับอย่างเดียว
     function getCountDb() {
+      if (DEMO) return Promise.resolve({ fs: demoStore.fsMod, db: null });
       if (!countDbPromise) {
         countDbPromise = Promise.all([
           import('https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js'),
@@ -699,7 +907,7 @@
     }
     // ฟิลด์ที่บันทึกพร้อมสถานะ (ยกเลิกสถานะ = ล้างชื่อ/เวลา)
     function checkFields(status, name) {
-      const FV = firebase.firestore.FieldValue;
+      const FV = FieldValueImpl;
       return status
         ? { status, checkedBy: name, checkedAt: FV.serverTimestamp() }
         : { status: '', checkedBy: FV.delete(), checkedAt: FV.delete() };
@@ -757,10 +965,10 @@
     }
 
     function addCompanyName(name) {
-      if (name) companyListRef.set({ names: firebase.firestore.FieldValue.arrayUnion(name) }, { merge: true }).catch(() => {});
+      if (name) companyListRef.set({ names: FieldValueImpl.arrayUnion(name) }, { merge: true }).catch(() => {});
     }
     function removeCompanyName(name) {
-      if (name) companyListRef.set({ names: firebase.firestore.FieldValue.arrayRemove(name) }, { merge: true }).catch(() => {});
+      if (name) companyListRef.set({ names: FieldValueImpl.arrayRemove(name) }, { merge: true }).catch(() => {});
     }
 
     async function refreshCompanyCounts() {
@@ -853,7 +1061,7 @@
         });
       });
       batch.update(db.collection(ASSETS_COL).doc(asset.docId), {
-        imageCount: firebase.firestore.FieldValue.increment(dataUrls.length)
+        imageCount: FieldValueImpl.increment(dataUrls.length)
       });
       return batch.commit();
     }
@@ -1321,7 +1529,7 @@
       const assetRef = db.collection(ASSETS_COL).doc(docId);
       if (entry.imageDocId) {
         batch.delete(db.collection(IMAGES_COL).doc(entry.imageDocId));
-        batch.update(assetRef, { imageCount: firebase.firestore.FieldValue.increment(-1) });
+        batch.update(assetRef, { imageCount: FieldValueImpl.increment(-1) });
       } else {
         batch.update(assetRef, { images: (target.images || []).filter((_, idx) => idx !== entry.legacyIndex) });
       }
@@ -2794,6 +3002,26 @@
       XLSX.writeFile(wb, `ป้ายต้องทำใหม่_${String(currentCompany).replace(/[\\/:*?"<>|]/g, '_')}_${today}.xlsx`);
     }
   </script>
+  <!-- โหมดทดลอง: เลือกไฟล์ backup -->
+  <div id="demoPicker" class="hidden fixed inset-0 z-[99] bg-slate-900/80 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 space-y-3">
+      <h3 class="font-bold text-slate-900 text-lg">🧪 โหมดทดลอง</h3>
+      <p class="text-sm text-slate-600">ใช้ข้อมูลจากไฟล์ backup ในเครื่องนี้ <b>ไม่เชื่อมต่อฐานข้อมูลจริง</b> ไม่ใช้โควต้า · กดอะไรก็ได้ ไม่บันทึกจริง · ปิดหรือรีเฟรชหน้าแล้วหายหมด</p>
+      <ol class="text-xs text-slate-500 list-decimal pl-5 space-y-0.5">
+        <li>เปิดโฟลเดอร์ <b>Desktop\fixed-asset-backup\(วันที่)</b></li>
+        <li>เลือกไฟล์ <b>.json ทั้งหมด</b> ในโฟลเดอร์ (กด Ctrl+A) — อย่างน้อยต้องมี skyai_assets_v9_clean.json</li>
+      </ol>
+      <label class="block w-full cursor-pointer bg-orange-500 hover:bg-orange-600 text-white font-bold text-center py-2.5 rounded-lg">
+        เลือกไฟล์ backup
+        <input type="file" accept=".json,application/json" multiple class="hidden" onchange="loadDemoFiles(this.files)">
+      </label>
+      <div id="demoPickerMsg" class="text-xs text-red-600 min-h-[1rem]"></div>
+      <a href="./" class="block text-center text-xs text-slate-500 hover:underline">ออกจากโหมดทดลอง กลับไปใช้ข้อมูลจริง</a>
+    </div>
+  </div>
+  <div id="demoBanner" class="hidden fixed inset-0 z-[98] pointer-events-none border-4 border-orange-500">
+    <div class="absolute top-0 left-1/2 -translate-x-1/2 bg-orange-500 text-white text-[11px] font-bold px-3 py-0.5 rounded-b-lg shadow">🧪 โหมดทดลอง · ข้อมูลจาก backup · ไม่บันทึกจริง</div>
+  </div>
   <!-- ถามชื่อผู้ตรวจ (ครั้งแรกของเครื่อง) -->
   <div id="inspectorModal" class="hidden fixed inset-0 z-[95] bg-black/50 flex items-center justify-center p-4">
     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-5 space-y-3">
