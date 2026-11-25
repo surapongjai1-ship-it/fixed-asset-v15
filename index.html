@@ -3209,10 +3209,45 @@
       return S;
     }
 
+    // รวมรายการที่เลขทะเบียนเดียวกันจากหลาย Tab ให้เหลือรายการเดียว (เช่น รอบแรก + รอบเก็บตก)
+    // เลือกผล: ตรวจแล้ว ชนะ ยังไม่ตรวจ → ถ้าตรวจแล้วทั้งคู่ ใช้ที่ตรวจทีหลัง (เวลาที่บันทึก, ถ้าไม่มีเวลาใช้ Tab ที่อยู่ทีหลัง)
+    // ถ้าสำเนาไหนเป็นรายการตามทะเบียน (สุ่ม) ให้นับเป็นรายการตามทะเบียน
+    function dedupeAcrossTabs(items, tabOrder) {
+      const keyOf = (a) => String(a.code || '').trim().toUpperCase();
+      const ms = (a) => (a.checkedAt && typeof a.checkedAt.toDate === 'function') ? a.checkedAt.toDate().getTime() : -1;
+      const better = (x, y) => {           // true ถ้า x ควรใช้แทน y
+        if (isChecked(x) !== isChecked(y)) return isChecked(x);
+        if (ms(x) !== ms(y)) return ms(x) > ms(y);
+        return tabOrder.indexOf(x._tab) > tabOrder.indexOf(y._tab);
+      };
+      const groups = new Map(), out = [];
+      items.forEach(a => {
+        const k = keyOf(a);
+        if (!k) { out.push(a); return; }                     // ไม่มีเลขทะเบียน: ไม่รวม
+        (groups.get(k) || groups.set(k, []).get(k)).push(a);
+      });
+      let dupCount = 0;
+      const conflicts = [];
+      groups.forEach(list => {
+        let win = list[0];
+        list.forEach(a => { if (better(a, win)) win = a; });
+        if (list.length > 1) {
+          dupCount += list.length - 1;
+          const statuses = [...new Set(list.filter(a => a.status).map(a => a.status))];
+          if (statuses.length > 1) conflicts.push({ win, list });
+          win = { ...win, _tabs: [...new Set(list.map(a => a._tab))],
+            auditType: list.some(a => a.auditType !== 'นอกสุ่ม') ? (win.auditType === 'นอกสุ่ม' ? 'สุ่ม' : win.auditType) : 'นอกสุ่ม' };
+        }
+        out.push(win);
+      });
+      return { all: out, dupCount, conflicts };
+    }
+
     function renderSignReport(tabs, title) {
-      const all = tabs.flatMap(t => t.list.map(a => ({ ...a, _tab: t.name })));
-      const S = signStats(all);
       const multi = tabs.length > 1;
+      const rawAll = tabs.flatMap(t => t.list.map(a => ({ ...a, _tab: t.name })));
+      const { all, dupCount, conflicts } = multi ? dedupeAcrossTabs(rawAll, tabs.map(t => t.name)) : { all: rawAll, dupCount: 0, conflicts: [] };
+      const S = signStats(all);
 
       const times = all.map(a => a.checkedAt && typeof a.checkedAt.toDate === 'function' ? a.checkedAt.toDate() : null).filter(Boolean).sort((x, y) => x - y);
       const dfmt = (d) => d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' });
@@ -3235,7 +3270,8 @@
           const rows = items.filter(a => a._tab === t.name);
           if (!rows.length) return;
           if (multi) body += groupHead(`${t.name} (${rows.length} รายการ)`, 6);
-          body += rows.map(a => row([n(++i), a.code, a.name, a.location || '-', statusOf(a), a.remark || ''])).join('');
+          body += rows.map(a => row([n(++i), a.code, a.name, a.location || '-', statusOf(a),
+            { html: esc(a.remark || '') + (a._tabs && a._tabs.length > 1 ? `<div style="color:#64748b;font-size:11px">พบใน: ${esc(a._tabs.join(', '))}</div>` : '') }])).join('');
         });
         return `<table class="rpt"><thead><tr><th class="num">ลำดับ</th><th>เลขทะเบียน</th><th>ชื่อทรัพย์สิน</th><th>สถานที่</th><th>สภาพ</th><th>หมายเหตุ</th></tr></thead><tbody>${body}</tbody></table>`;
       };
@@ -3250,8 +3286,9 @@
           <th>หน่วยงาน / Tab</th><th class="num">ตามทะเบียน</th><th class="num">ตรวจแล้ว</th><th class="num">%</th>
           <th class="num">ชำรุด</th><th class="num">สูญหาย</th><th class="num">ยังไม่ตรวจ</th><th class="num">พบเพิ่ม</th></tr></thead><tbody>
           ${tabs.map(t => { const s = signStats(t.list); return row([t.name, n(s.total), n(s.done), { html: s.pct + '%', num: true }, n(s.damage), n(s.lost), n(s.todo), n(s.extras)]); }).join('')}
-          ${row([{ html: '<b>รวม</b>' }, n(S.total), n(S.done), { html: S.pct + '%', num: true }, n(S.damage), n(S.lost), n(S.todo), n(S.extras)])}
-        </tbody></table>` : '';
+          ${row([{ html: `<b>รวม${dupCount ? ' (นับรายการซ้ำครั้งเดียว)' : ''}</b>` }, n(S.total), n(S.done), { html: S.pct + '%', num: true }, n(S.damage), n(S.lost), n(S.todo), n(S.extras)])}
+        </tbody></table>
+        ${dupCount ? `<div style="margin-top:4px;font-size:12px;color:#475569">* พบรายการที่เลขทะเบียนซ้ำกันระหว่าง Tab ${dupCount.toLocaleString()} รายการ — นับครั้งเดียว โดยใช้ผลที่ตรวจแล้ว และถ้าตรวจหลายครั้งใช้ผลล่าสุด</div>` : ''}` : '';
 
       document.getElementById('signReportBody').innerHTML = `
         <div style="text-align:center">
@@ -3278,6 +3315,13 @@
 
         <h3>3. รายการที่พบเพิ่ม นอกทะเบียน (${extras.length} รายการ)</h3>
         ${itemTable(extras, a => a.status || 'พบแล้ว (ไม่ระบุสภาพ)')}
+
+        ${conflicts.length ? `
+        <h3>รายการที่ผลตรวจไม่ตรงกันระหว่าง Tab (${conflicts.length} รายการ · ใช้ผลล่าสุดในการสรุป)</h3>
+        <table class="rpt"><thead><tr><th>เลขทะเบียน</th><th>ชื่อทรัพย์สิน</th><th>ผลแต่ละ Tab</th><th>ผลที่ใช้</th></tr></thead><tbody>
+          ${conflicts.map(c => row([c.win.code, c.win.name,
+            { html: c.list.map(a => `${esc(a._tab)}: ${esc(a.status || 'ยังไม่ตรวจ')}`).join('<br>') }, { html: `<b>${esc(c.win.status)}</b>` }])).join('')}
+        </tbody></table>` : ''}
 
         <h3>4. ผู้ตรวจนับ</h3>
         <div>${peopleList.length ? peopleList.map(([nm, c]) => `${esc(nm)} (${c.toLocaleString()} รายการ)`).join(', ')
