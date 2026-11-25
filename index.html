@@ -3212,7 +3212,7 @@
       // วันที่แบบสั้น (25/11/69) — เวลาละเอียดดูได้ใน Excel
       const when = (v) => { const d = v && typeof v.toDate === 'function' ? v.toDate() : null; return d ? d.toLocaleDateString('th-TH', { day: '2-digit', month: '2-digit', year: '2-digit' }) : ''; };
       const opt = getPdfCols();
-      const PER_PAGE = 50;   // หน้าละ 50 รายการ แถวละบรรทัดเดียว (ยาวเกินช่องตัดด้วย … · ข้อมูลเต็มอยู่ใน Excel)
+      const PER_PAGE = 60;   // หน้าละ 60 รายการ แถวละบรรทัดเดียว (ยาวเกินช่องตัดด้วย … · ข้อมูลเต็มอยู่ใน Excel)
       const clip = (v) => `<div class="clip">${esc(v)}</div>`;
       const rowsHtml = list.map((a, i) => `
         <tr class="${a.status === 'ชำรุด' || a.status === 'สูญหาย' ? 'bad' : ''}">
