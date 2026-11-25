@@ -23,6 +23,13 @@
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap');
     body { font-family: 'Sarabun', sans-serif; background-color: #f1f5f9; }
+    @media print {
+      body > *:not(#execDash) { display: none !important; }
+      #execDash { position: static !important; overflow: visible !important; background: #fff !important; }
+      #execDash .no-print { display: none !important; }
+      #execDash section, #execDash .grid > div { break-inside: avoid; }
+      * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    }
     .status-btn.active-ดี { background-color: #059669; color: white; border-color: #059669; }
     .status-btn.active-ชำรุด { background-color: #d97706; color: white; border-color: #d97706; }
     .status-btn.active-สูญหาย { background-color: #dc2626; color: white; border-color: #dc2626; }
@@ -59,6 +66,9 @@
 
     <!-- เมนู: มือถือ = แผ่นเต็มความกว้างใต้แถบหัว, จอใหญ่ = กล่องดรอปดาวน์ทางขวา -->
     <nav id="mobileMenu" class="hidden mt-3 border-t border-slate-700 pt-2 text-sm sm:absolute sm:right-0 sm:top-full sm:mt-2 sm:w-72 sm:bg-slate-900 sm:border sm:rounded-xl sm:shadow-2xl sm:p-2 sm:z-40">
+      <button onclick="closeMobileMenu(); openExecDashboard()" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left font-bold">
+        <i class="fa-solid fa-chart-line w-5 text-center text-blue-400"></i> Dashboard ผู้บริหาร
+      </button>
       <button onclick="closeMobileMenu(); toggleMetaCard(true)" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
         <i class="fa-solid fa-user-pen w-5 text-center text-slate-300"></i> ผู้ตรวจ และวันที่ตรวจ
       </button>
@@ -2152,6 +2162,176 @@
       renderLocProgress(companyAssets);
     }
 
+    // ===================== Dashboard ผู้บริหาร =====================
+    // ภาพรวมทุกบริษัทใช้การนับจากเซิร์ฟเวอร์ (count) → ใช้โควต้าน้อยมาก ไม่ต้องโหลดรายการทั้งหมด
+    // รายการชำรุด/สูญหาย ดึงเฉพาะรายการที่มีสถานะนั้น (มักมีไม่กี่รายการ)
+    let execCache = null;            // { at, data } เก็บไว้ 5 นาที กันกดเปิดซ้ำแล้วกินโควต้า
+    const EXEC_CACHE_MS = 5 * 60 * 1000;
+
+    function closeExecDashboard() {
+      document.getElementById('execDash').classList.add('hidden');
+      document.body.style.overflow = '';
+    }
+
+    async function openExecDashboard(force = false) {
+      const box = document.getElementById('execDash');
+      box.classList.remove('hidden');
+      document.body.style.overflow = 'hidden';
+      if (!force && execCache && Date.now() - execCache.at < EXEC_CACHE_MS) return renderExecDashboard(execCache);
+
+      document.getElementById('execBody').innerHTML =
+        `<div class="text-center text-slate-500 text-sm py-20"><i class="fa-solid fa-spinner fa-spin mr-2"></i> กำลังรวบรวมข้อมูลทุกบริษัท...</div>`;
+      try {
+        const { fs, db: cdb } = await getCountDb();
+        const col = fs.collection(cdb, ASSETS_COL);
+        const W = (f, v) => fs.where(f, '==', v);
+        const cnt = async (...conds) => (await fs.getCountFromServer(fs.query(col, ...conds))).data().count;
+        const rows = await Promise.all(companyNames.map(async (c) => {
+          const [total, good, damage, lost, tagBroken, tagMissing] = await Promise.all([
+            cnt(W('company', c)),
+            cnt(W('company', c), W('status', 'ดี')),
+            cnt(W('company', c), W('status', 'ชำรุด')),
+            cnt(W('company', c), W('status', 'สูญหาย')),
+            cnt(W('company', c), W('tag', 'ป้ายชำรุด')),
+            cnt(W('company', c), W('tag', 'ไม่มีป้าย')),
+          ]);
+          return { company: c, total, good, damage, lost, todo: Math.max(0, total - good - damage - lost), tagBroken, tagMissing };
+        }));
+        const exSnap = await fs.getDocs(fs.query(col, fs.where('status', 'in', ['ชำรุด', 'สูญหาย']), fs.limit(300)));
+        const exceptions = exSnap.docs.map(d => ({ docId: d.id, ...d.data() }));
+        execCache = { at: Date.now(), rows, exceptions };
+        renderExecDashboard(execCache);
+      } catch (err) {
+        const quota = err && (err.code === 'resource-exhausted' || /quota/i.test(err.message || ''));
+        document.getElementById('execBody').innerHTML = `<div class="bg-white rounded-xl p-6 text-center text-red-600 text-sm">` +
+          (quota ? 'โควต้าการใช้งานฐานข้อมูลของวันนี้หมดแล้ว จะใช้ได้อีกครั้งหลังประมาณ 15:00 น.' : `โหลดข้อมูลไม่สำเร็จ: ${esc(err && err.message)}`) + `</div>`;
+      }
+    }
+
+    function execPct(n, d) { return d > 0 ? Math.round(n / d * 100) : 0; }
+
+    function execStackBar(r, h = 'h-3') {
+      const seg = (n, cls) => n > 0 && r.total > 0 ? `<div class="${cls} h-full" style="width:${(n / r.total * 100).toFixed(2)}%"></div>` : '';
+      return `<div class="flex ${h} bg-slate-200 rounded-full overflow-hidden">${seg(r.good, 'bg-emerald-600')}${seg(r.damage, 'bg-amber-500')}${seg(r.lost, 'bg-red-600')}</div>`;
+    }
+
+    function execOpenCompany(company) {
+      closeExecDashboard();
+      if (company !== currentCompany) switchCompany(company);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function renderExecDashboard({ at, rows, exceptions }) {
+      const sum = (k) => rows.reduce((s, r) => s + r[k], 0);
+      const T = { total: sum('total'), good: sum('good'), damage: sum('damage'), lost: sum('lost'), todo: sum('todo'), tagBroken: sum('tagBroken'), tagMissing: sum('tagMissing') };
+      const done = T.total - T.todo;
+      document.getElementById('execStamp').innerText = `ข้อมูล ณ ${new Date(at).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' })}`;
+
+      const kpi = (label, value, sub, color) => `
+        <div class="bg-white rounded-xl border border-slate-200 p-3 sm:p-4">
+          <div class="text-[11px] sm:text-xs text-slate-500">${label}</div>
+          <div class="text-2xl sm:text-3xl font-bold ${color} mt-0.5">${value}</div>
+          <div class="text-[11px] text-slate-400 mt-0.5">${sub}</div>
+        </div>`;
+
+      // บริษัทที่ตรวจคืบหน้าน้อยสุดขึ้นก่อน (ผู้บริหารดูว่าต้องเร่งที่ไหน)
+      const sorted = [...rows].sort((a, b) => execPct(a.total - a.todo, a.total) - execPct(b.total - b.todo, b.total) || b.total - a.total);
+      const companyRows = sorted.map(r => {
+        const p = execPct(r.total - r.todo, r.total);
+        const n = (v, cls = '') => `<td class="px-2 py-2 text-right font-mono ${v ? cls : 'text-slate-300'}">${v.toLocaleString()}</td>`;
+        return `
+          <tr class="border-t border-slate-100 hover:bg-blue-50/50 cursor-pointer" onclick="execOpenCompany(${js(r.company)})" title="เปิดรายการของบริษัทนี้">
+            <td class="px-2 py-2 font-bold text-slate-800 whitespace-nowrap">${esc(r.company)}</td>
+            <td class="px-2 py-2 min-w-[140px]">
+              <div class="flex items-center gap-2"><div class="flex-1">${execStackBar(r, 'h-2.5')}</div><span class="text-xs font-bold w-10 text-right ${p === 100 ? 'text-emerald-600' : 'text-slate-700'}">${p}%</span></div>
+            </td>
+            ${n(r.total, 'text-slate-800')}${n(r.good, 'text-emerald-700')}${n(r.damage, 'text-amber-600 font-bold')}${n(r.lost, 'text-red-600 font-bold')}${n(r.todo, 'text-slate-600')}${n(r.tagBroken + r.tagMissing, 'text-orange-600')}
+          </tr>`;
+      }).join('');
+
+      const exRows = [...exceptions].sort((a, b) =>
+        String(a.status).localeCompare(String(b.status), 'th') || String(a.company).localeCompare(String(b.company), 'th') || String(a.code).localeCompare(String(b.code))
+      ).map(x => `
+          <tr class="border-t border-slate-100 align-top">
+            <td class="px-2 py-1.5 whitespace-nowrap"><span class="text-[11px] font-bold px-2 py-0.5 rounded ${x.status === 'สูญหาย' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-800'}">${esc(x.status)}</span></td>
+            <td class="px-2 py-1.5 whitespace-nowrap text-slate-600">${esc(x.company)}</td>
+            <td class="px-2 py-1.5 font-mono text-blue-700 whitespace-nowrap">${esc(x.code)}</td>
+            <td class="px-2 py-1.5 text-slate-800 min-w-[160px]">${esc(x.name)}</td>
+            <td class="px-2 py-1.5 text-slate-600 min-w-[110px]">${esc(x.location || '-')}</td>
+            <td class="px-2 py-1.5 text-slate-500 min-w-[110px]">${esc(x.remark || '')}</td>
+          </tr>`).join('');
+
+      // ความคืบหน้าแยกชั้น ของบริษัทที่เปิดอยู่ (ใช้ข้อมูลที่โหลดไว้แล้ว ไม่อ่านเพิ่ม)
+      const groups = assetsLoading ? [] : groupLocations(assets.filter(a => a.company === currentCompany));
+      const floorRows = groups.map(g => {
+        const p = execPct(g.done, g.total);
+        return `
+          <div class="flex items-center gap-2 text-xs">
+            <span class="w-28 sm:w-40 truncate ${g.isFloor ? 'font-bold text-slate-800' : 'text-slate-600'}" title="${esc(g.key)}">${esc(g.key)}</span>
+            <div class="flex-1 h-2.5 bg-slate-200 rounded-full overflow-hidden"><div class="h-full ${p === 100 ? 'bg-emerald-500' : 'bg-blue-500'}" style="width:${p}%"></div></div>
+            <span class="w-20 text-right font-mono text-slate-500">${g.done}/${g.total}</span>
+          </div>`;
+      }).join('');
+
+      const legend = (cls, label, v) => `<span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full ${cls}"></span>${label} <b class="text-slate-800">${v.toLocaleString()}</b></span>`;
+
+      document.getElementById('execBody').innerHTML = `
+        <div class="grid grid-cols-2 lg:grid-cols-5 gap-2 sm:gap-3">
+          ${kpi('ทรัพย์สินทั้งหมด', T.total.toLocaleString(), `${rows.length} บริษัท`, 'text-slate-800')}
+          ${kpi('ตรวจนับแล้ว', execPct(done, T.total) + '%', `${done.toLocaleString()} รายการ`, 'text-blue-700')}
+          ${kpi('ยังไม่ตรวจ', T.todo.toLocaleString(), 'รายการ', 'text-slate-600')}
+          ${kpi('ชำรุด / สูญหาย', (T.damage + T.lost).toLocaleString(), `ชำรุด ${T.damage} · สูญหาย ${T.lost}`, T.damage + T.lost ? 'text-red-600' : 'text-slate-800')}
+          ${kpi('ป้ายต้องทำใหม่', (T.tagBroken + T.tagMissing).toLocaleString(), `ชำรุด ${T.tagBroken} · ไม่มีป้าย ${T.tagMissing}`, 'text-orange-600')}
+        </div>
+
+        <section class="bg-white rounded-xl border border-slate-200 p-3 sm:p-4 space-y-2">
+          <h3 class="font-bold text-slate-800 text-sm">ภาพรวมผลการตรวจนับ</h3>
+          ${execStackBar({ ...T }, 'h-4')}
+          <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600">
+            ${legend('bg-emerald-600', 'สภาพดี', T.good)}${legend('bg-amber-500', 'ชำรุด', T.damage)}${legend('bg-red-600', 'สูญหาย', T.lost)}${legend('bg-slate-300', 'ยังไม่ตรวจ', T.todo)}
+          </div>
+        </section>
+
+        <section class="bg-white rounded-xl border border-slate-200 p-3 sm:p-4">
+          <div class="flex justify-between items-baseline mb-2">
+            <h3 class="font-bold text-slate-800 text-sm">แยกตามบริษัท</h3>
+            <span class="text-[11px] text-slate-400 no-print">กดที่บริษัทเพื่อเปิดรายการ</span>
+          </div>
+          <div class="overflow-x-auto -mx-1">
+            <table class="w-full text-sm">
+              <thead><tr class="text-[11px] text-slate-500 text-right">
+                <th class="px-2 py-1 text-left font-medium">บริษัท</th><th class="px-2 py-1 text-left font-medium">ความคืบหน้า</th>
+                <th class="px-2 py-1 font-medium">ทั้งหมด</th><th class="px-2 py-1 font-medium">ดี</th><th class="px-2 py-1 font-medium">ชำรุด</th>
+                <th class="px-2 py-1 font-medium">สูญหาย</th><th class="px-2 py-1 font-medium">ยังไม่ตรวจ</th><th class="px-2 py-1 font-medium">ป้ายต้องทำใหม่</th>
+              </tr></thead>
+              <tbody>${companyRows}</tbody>
+              <tfoot><tr class="border-t-2 border-slate-300 font-bold text-right text-slate-800">
+                <td class="px-2 py-2 text-left">รวม</td><td class="px-2 py-2 text-left text-xs">${execPct(done, T.total)}%</td>
+                <td class="px-2 py-2 font-mono">${T.total.toLocaleString()}</td><td class="px-2 py-2 font-mono">${T.good.toLocaleString()}</td>
+                <td class="px-2 py-2 font-mono">${T.damage}</td><td class="px-2 py-2 font-mono">${T.lost}</td>
+                <td class="px-2 py-2 font-mono">${T.todo.toLocaleString()}</td><td class="px-2 py-2 font-mono">${(T.tagBroken + T.tagMissing).toLocaleString()}</td>
+              </tr></tfoot>
+            </table>
+          </div>
+        </section>
+
+        <section class="bg-white rounded-xl border border-slate-200 p-3 sm:p-4">
+          <h3 class="font-bold text-slate-800 text-sm mb-2">รายการชำรุด / สูญหาย <span class="font-normal text-slate-400">(${exceptions.length} รายการ)</span></h3>
+          ${exceptions.length ? `<div class="overflow-x-auto -mx-1"><table class="w-full text-xs">
+            <thead><tr class="text-[11px] text-slate-500 text-left">
+              <th class="px-2 py-1 font-medium">สถานะ</th><th class="px-2 py-1 font-medium">บริษัท</th><th class="px-2 py-1 font-medium">เลขทะเบียน</th>
+              <th class="px-2 py-1 font-medium">ชื่อทรัพย์สิน</th><th class="px-2 py-1 font-medium">สถานที่</th><th class="px-2 py-1 font-medium">หมายเหตุ</th>
+            </tr></thead><tbody>${exRows}</tbody></table></div>`
+            : `<div class="text-center text-emerald-600 text-sm py-4">✓ ไม่มีรายการชำรุดหรือสูญหาย</div>`}
+        </section>
+
+        <section class="bg-white rounded-xl border border-slate-200 p-3 sm:p-4 space-y-1.5">
+          <h3 class="font-bold text-slate-800 text-sm mb-1">ความคืบหน้าแยกชั้น — ${esc(currentCompany)}</h3>
+          ${floorRows || '<div class="text-slate-400 text-xs">ยังไม่มีข้อมูล</div>'}
+          <div class="text-[11px] text-slate-400 pt-1 no-print">ดูบริษัทอื่น: กดชื่อบริษัทในตารางด้านบน แล้วเปิด Dashboard อีกครั้ง</div>
+        </section>`;
+    }
+
     // --- ความคืบหน้าแยกตามสถานที่: ที่ยังตรวจไม่ครบขึ้นก่อน กดชื่อสถานที่เพื่อกรองรายการ ---
     let locProgressOpen = false;
     function toggleLocProgress() {
@@ -2469,5 +2649,22 @@
       XLSX.writeFile(wb, `รายงานตรวจนับ_${currentCompany}${meta.date ? "_" + meta.date : ""}.xlsx`);
     }
   </script>
+  <!-- Dashboard ผู้บริหาร (หน้าเต็มจอ) -->
+  <div id="execDash" class="hidden fixed inset-0 z-[90] bg-slate-100 overflow-y-auto">
+    <div class="max-w-6xl mx-auto px-4 py-4 space-y-3 sm:space-y-4">
+      <div class="flex items-start justify-between gap-2">
+        <div>
+          <h2 class="text-lg sm:text-xl font-bold text-slate-900">📊 Dashboard ผู้บริหาร</h2>
+          <div class="text-xs text-slate-500">สรุปผลการตรวจนับสินทรัพย์ถาวร · <span id="execStamp"></span></div>
+        </div>
+        <div class="flex gap-1.5 shrink-0 no-print">
+          <button onclick="openExecDashboard(true)" title="ดึงข้อมูลล่าสุด" class="bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-sm px-3 py-2 rounded-lg"><i class="fa-solid fa-rotate"></i><span class="hidden sm:inline ml-1">รีเฟรช</span></button>
+          <button onclick="window.print()" title="พิมพ์ หรือบันทึกเป็น PDF" class="bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-sm px-3 py-2 rounded-lg"><i class="fa-solid fa-print"></i><span class="hidden sm:inline ml-1">พิมพ์ / PDF</span></button>
+          <button onclick="closeExecDashboard()" aria-label="ปิด" class="bg-slate-900 hover:bg-slate-800 text-white text-sm px-3 py-2 rounded-lg"><i class="fa-solid fa-xmark"></i><span class="hidden sm:inline ml-1">ปิด</span></button>
+        </div>
+      </div>
+      <div id="execBody" class="space-y-3 sm:space-y-4"></div>
+    </div>
+  </div>
 </body>
 </html>
