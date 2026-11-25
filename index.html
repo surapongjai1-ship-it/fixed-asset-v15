@@ -24,12 +24,24 @@
     @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap');
     body { font-family: 'Sarabun', sans-serif; background-color: #f1f5f9; }
     @media print {
-      body > *:not(#execDash) { display: none !important; }
+      body:not(.print-sign) > *:not(#execDash) { display: none !important; }
+      body.print-sign > *:not(#signReport) { display: none !important; }
+      #signReport { position: static !important; overflow: visible !important; background: #fff !important; }
+      #signReport .no-print { display: none !important; }
+      #signReport .sheet { box-shadow: none !important; border: 0 !important; margin: 0 !important; padding: 0 !important; max-width: none !important; }
+      #signReport tr, #signReport .sign-block { break-inside: avoid; }
       #execDash { position: static !important; overflow: visible !important; background: #fff !important; }
       #execDash .no-print { display: none !important; }
       #execDash section, #execDash .grid > div { break-inside: avoid; }
       * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     }
+    @page { size: A4; margin: 14mm 12mm; }
+    #signReport .sheet { font-size: 13px; color: #0f172a; }
+    #signReport table.rpt { width: 100%; border-collapse: collapse; }
+    #signReport table.rpt th, #signReport table.rpt td { border: 1px solid #cbd5e1; padding: 4px 6px; vertical-align: top; }
+    #signReport table.rpt th { background: #f1f5f9; font-weight: 600; text-align: left; }
+    #signReport table.rpt td.num, #signReport table.rpt th.num { text-align: right; white-space: nowrap; }
+    #signReport h3 { font-weight: 700; margin: 14px 0 6px; font-size: 14px; }
     .status-btn.active-ดี { background-color: #059669; color: white; border-color: #059669; }
     .status-btn.active-ชำรุด { background-color: #d97706; color: white; border-color: #d97706; }
     .status-btn.active-สูญหาย { background-color: #dc2626; color: white; border-color: #dc2626; }
@@ -80,6 +92,9 @@
       </button>
       <button onclick="closeMobileMenu(); openCompanyHistory()" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
         <i class="fa-solid fa-clock-rotate-left w-5 text-center text-sky-400"></i> ประวัติการตรวจ
+      </button>
+      <button onclick="closeMobileMenu(); openSignReport()" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
+        <i class="fa-solid fa-file-signature w-5 text-center text-rose-300"></i> พิมพ์รายงานเซ็นรับรอง
       </button>
       <button onclick="closeMobileMenu(); exportToExcelClean()" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
         <i class="fa-solid fa-file-excel w-5 text-center text-emerald-400"></i> ส่งออก Excel
@@ -3121,6 +3136,99 @@
       XLSX.writeFile(wb, `รายงานตรวจนับ_${currentCompany}${meta.date ? "_" + meta.date : ""}.xlsx`);
     }
 
+    // ===================== รายงานผลการตรวจนับ (เซ็นรับรอง) =====================
+    // ใช้ข้อมูลของบริษัทที่เปิดอยู่ (โหลดไว้แล้ว ไม่อ่านฐานข้อมูลเพิ่ม)
+    function openSignReport() {
+      if (assetsLoading) return alert("กำลังโหลดรายการ รอสักครู่แล้วลองใหม่ครับ");
+      const list = assets.filter(a => a.company === currentCompany);
+      const sampled = list.filter(a => a.auditType !== 'นอกสุ่ม');
+      const extras = list.filter(a => a.auditType === 'นอกสุ่ม');
+      const by = (arr, st) => arr.filter(a => a.status === st).length;
+      const S = { total: sampled.length, good: by(sampled, 'ดี'), damage: by(sampled, 'ชำรุด'), lost: by(sampled, 'สูญหาย') };
+      S.done = S.good + S.damage + S.lost; S.todo = S.total - S.done;
+      const pct = S.total ? Math.round(S.done / S.total * 100) : 0;
+      const tagBroken = list.filter(a => a.tag === 'ป้ายชำรุด').length, tagMissing = list.filter(a => a.tag === 'ไม่มีป้าย').length;
+
+      // ช่วงวันที่ตรวจ: จากเวลาที่บันทึกไว้ ถ้าไม่มีใช้วันที่ตรวจนับที่กรอกในแอป
+      const times = list.map(a => a.checkedAt && typeof a.checkedAt.toDate === 'function' ? a.checkedAt.toDate() : null).filter(Boolean).sort((x, y) => x - y);
+      const dfmt = (d) => d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' });
+      const meta = companyMetadata[currentCompany] || {};
+      const period = times.length ? (dfmt(times[0]) === dfmt(times.at(-1)) ? dfmt(times[0]) : `${dfmt(times[0])} – ${dfmt(times.at(-1))}`)
+        : (meta.date ? dfmt(new Date(meta.date)) : '........................');
+
+      // ผู้ตรวจนับ (จากชื่อที่บันทึกตอนกดสถานะ)
+      const people = {};
+      list.filter(isChecked).forEach(a => { if (a.checkedBy) people[a.checkedBy] = (people[a.checkedBy] || 0) + 1; });
+      const peopleList = Object.entries(people).sort((a, b) => b[1] - a[1]);
+
+      const sev = (a) => (a.status === 'สูญหาย' ? 0 : 1);
+      const issues = list.filter(a => a.status === 'ชำรุด' || a.status === 'สูญหาย')
+        .sort((a, b) => sev(a) - sev(b) || (Number(a.id) || 0) - (Number(b.id) || 0));
+      const extrasSorted = extras.slice().sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
+      const row = (cells) => '<tr>' + cells.map(c => `<td${c && c.num ? ' class="num"' : ''}>${(c && typeof c === 'object') ? c.html : esc(c)}</td>`).join('') + '</tr>';
+      const n = (v) => ({ html: Number(v).toLocaleString(), num: true });
+
+      document.getElementById('signReportBody').innerHTML = `
+        <div style="text-align:center">
+          <div style="font-size:18px;font-weight:700">รายงานผลการตรวจนับทรัพย์สินถาวร</div>
+          <div style="font-size:15px;font-weight:600;margin-top:2px">บริษัท ${esc(currentCompany)}</div>
+          <div style="margin-top:4px;color:#475569">วันที่ตรวจนับ ${esc(period)} &nbsp;·&nbsp; พิมพ์เมื่อ ${esc(new Date().toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' }))}</div>
+        </div>
+
+        <h3>1. สรุปผลการตรวจนับ</h3>
+        <table class="rpt" style="max-width:120mm">
+          ${row(['รายการตามทะเบียน (รายการสุ่ม)', n(S.total)])}
+          ${row([{ html: '<b>ตรวจนับแล้ว</b>' }, { html: `<b>${S.done.toLocaleString()}</b> (${pct}%)`, num: true }])}
+          ${row([{ html: '&nbsp;&nbsp;&nbsp;– สภาพดี / ปกติ' }, n(S.good)])}
+          ${row([{ html: '&nbsp;&nbsp;&nbsp;– ชำรุด' }, n(S.damage)])}
+          ${row([{ html: '&nbsp;&nbsp;&nbsp;– สูญหาย' }, n(S.lost)])}
+          ${row([{ html: S.todo ? '<b style="color:#b45309">ยังไม่ได้ตรวจ</b>' : 'ยังไม่ได้ตรวจ' }, n(S.todo)])}
+          ${row(['พบเพิ่ม (นอกทะเบียน)', n(extras.length)])}
+          ${row(['ป้ายชำรุด / ไม่มีป้าย', { html: `${tagBroken.toLocaleString()} / ${tagMissing.toLocaleString()}`, num: true }])}
+        </table>
+
+        <h3>2. รายการชำรุด / สูญหาย (${issues.length} รายการ)</h3>
+        ${issues.length ? `<table class="rpt"><thead><tr><th class="num">ลำดับ</th><th>เลขทะเบียน</th><th>ชื่อทรัพย์สิน</th><th>สถานที่</th><th>สภาพ</th><th>หมายเหตุ</th></tr></thead><tbody>
+          ${issues.map((a, i) => row([n(i + 1), a.code, a.name, a.location || '-', a.status, a.remark || ''])).join('')}</tbody></table>`
+          : '<div>— ไม่มี —</div>'}
+
+        <h3>3. รายการที่พบเพิ่ม นอกทะเบียน (${extras.length} รายการ)</h3>
+        ${extras.length ? `<table class="rpt"><thead><tr><th class="num">ลำดับ</th><th>เลขทะเบียน</th><th>ชื่อ / รายละเอียด</th><th>สถานที่</th><th>สภาพ</th><th>หมายเหตุ</th></tr></thead><tbody>
+          ${extrasSorted.map((a, i) => row([n(i + 1), a.code, a.name, a.location || '-', a.status || 'พบแล้ว (ไม่ระบุสภาพ)', a.remark || ''])).join('')}</tbody></table>`
+          : '<div>— ไม่มี —</div>'}
+
+        <h3>4. ผู้ตรวจนับ</h3>
+        <div>${peopleList.length ? peopleList.map(([nm, c]) => `${esc(nm)} (${c.toLocaleString()} รายการ)`).join(', ')
+          : (meta.inspector ? esc(meta.inspector) : '........................................')}</div>
+
+        <h3>5. ลงชื่อรับรอง</h3>
+        <div class="sign-block" style="display:grid;grid-template-columns:1fr 1fr;gap:18mm 12mm;margin-top:10mm">
+          ${['ผู้ตรวจนับ', 'ผู้ตรวจนับ', 'ผู้ตรวจสอบ (ฝ่ายบัญชี)', 'ผู้อนุมัติ'].map(role => `
+            <div style="text-align:center">
+              <div>ลงชื่อ ..................................................</div>
+              <div style="margin-top:6px">( .................................................. )</div>
+              <div style="margin-top:4px;font-weight:600">${role}</div>
+              <div style="margin-top:4px">วันที่ ........ / ........ / ............</div>
+            </div>`).join('')}
+        </div>`;
+
+      const warn = document.getElementById('signReportWarn');
+      warn.innerHTML = S.todo ? `⚠️ ยังมีรายการที่ <b>ยังไม่ได้ตรวจ ${S.todo.toLocaleString()} รายการ</b> — ในรายงานจะระบุตัวเลขนี้ไว้ ควรตรวจให้ครบก่อนพิมพ์ฉบับจริง` : '';
+      warn.classList.toggle('hidden', !S.todo);
+      document.getElementById('signReport').classList.remove('hidden');
+      document.body.style.overflow = 'hidden';
+    }
+    function closeSignReport() {
+      document.getElementById('signReport').classList.add('hidden');
+      document.body.style.overflow = '';
+    }
+    function printSignReport() {
+      document.body.classList.add('print-sign');
+      const done = () => { document.body.classList.remove('print-sign'); window.removeEventListener('afterprint', done); };
+      window.addEventListener('afterprint', done);
+      window.print();
+    }
+
     // ส่งออกรายการป้ายต้องทำใหม่ (ป้ายชำรุด + ไม่มีป้าย) ของบริษัทที่เปิดอยู่ เรียงตามชั้น/สถานที่ ไว้ส่งคนพิมพ์ป้าย
     // ใช้ข้อมูลที่โหลดไว้แล้ว ไม่อ่านฐานข้อมูลเพิ่ม
     function exportTagReprintList() {
@@ -3221,6 +3329,16 @@
         class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-blue-500">
       <button onclick="saveInspectorName()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-lg">บันทึก</button>
     </div>
+  </div>
+  <!-- รายงานผลการตรวจนับ สำหรับเซ็นรับรอง -->
+  <div id="signReport" class="hidden fixed inset-0 z-[90] bg-slate-200 overflow-y-auto">
+    <div class="no-print sticky top-0 z-10 bg-slate-900 text-white px-4 py-2 flex items-center gap-2">
+      <span class="font-bold text-sm flex-1 truncate">📝 รายงานเซ็นรับรอง</span>
+      <button onclick="printSignReport()" class="bg-blue-600 hover:bg-blue-700 text-sm px-3 py-1.5 rounded-lg"><i class="fa-solid fa-print mr-1"></i> พิมพ์ / PDF</button>
+      <button onclick="closeSignReport()" aria-label="ปิด" class="bg-slate-700 hover:bg-slate-600 text-sm px-3 py-1.5 rounded-lg"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div id="signReportWarn" class="no-print hidden max-w-[210mm] mx-auto mt-3 bg-amber-50 border border-amber-300 text-amber-800 text-sm rounded-lg px-3 py-2"></div>
+    <div id="signReportBody" class="sheet bg-white max-w-[210mm] mx-auto my-3 p-[12mm] shadow-xl"></div>
   </div>
   <!-- Dashboard ผู้บริหาร (หน้าเต็มจอ) -->
   <div id="execDash" class="hidden fixed inset-0 z-[90] bg-slate-100 overflow-y-auto">
