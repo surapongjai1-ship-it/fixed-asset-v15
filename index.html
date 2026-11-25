@@ -721,6 +721,11 @@
     }
     // การ์ดที่กางส่วน "ป้าย / หมายเหตุ" ไว้ (จำไว้ เพราะรายการถูกวาดใหม่ทุกครั้งที่ข้อมูลเปลี่ยน)
     const expandedCards = new Set();
+    const expandedHistory = new Set();   // การ์ดที่กางประวัติไว้
+    function toggleHistory(docId) {
+      if (expandedHistory.has(docId)) expandedHistory.delete(docId); else expandedHistory.add(docId);
+      renderList();
+    }
     function toggleCardExtra(docId) {
       if (expandedCards.has(docId)) expandedCards.delete(docId); else expandedCards.add(docId);
       renderList();
@@ -912,6 +917,21 @@
         ? { status, checkedBy: name, checkedAt: FV.serverTimestamp() }
         : { status: '', checkedBy: FV.delete(), checkedAt: FV.delete() };
     }
+    // ประวัติ 1 รายการ: { at: เวลา ISO (จากเครื่องคนกด), by: ชื่อ, f: 'status'|'tag'|'add', from, to }
+    function historyEntry(f, from, to, by) {
+      return { at: new Date().toISOString(), by: by || getInspectorName() || 'ไม่ระบุ', f, from: from || '', to: to || '' };
+    }
+    function addHistory(entry) { return FieldValueImpl.arrayUnion(entry); }
+    const HISTORY_FIELD_LABEL = { status: 'สภาพ', tag: 'ป้าย', add: 'เพิ่มรายการนอกสุ่ม' };
+    function historyText(h) {
+      if (h.f === 'add') return `เพิ่มรายการนอกสุ่ม${h.to ? ` (สภาพ: ${h.to})` : ''}`;
+      const v = (x) => x || (h.f === 'status' ? 'ยังไม่ตรวจ' : '-');
+      return `${HISTORY_FIELD_LABEL[h.f] || h.f}: ${v(h.from)} → ${v(h.to)}`;
+    }
+    function sortedHistory(item) {
+      return (Array.isArray(item.history) ? item.history : []).slice().sort((a, b) => String(b.at).localeCompare(String(a.at)));
+    }
+
     function fmtCheckedAt(ts) {
       const d = ts && typeof ts.toDate === 'function' ? ts.toDate() : (ts ? new Date(ts) : null);
       if (!d || isNaN(d)) return '';
@@ -1280,6 +1300,7 @@
         auditType: 'นอกสุ่ม',
         checkedBy: inspector,
         checkedAt: FieldValueImpl.serverTimestamp(),
+        history: [historyEntry('add', '', statusVal, inspector)],
         createdAt: new Date().toISOString()
       }).then(() => extraImages.length ? addImagesToAsset(extraAsset, extraImages) : null).then(() => {
         closeAddExtraModal();
@@ -1948,6 +1969,7 @@
             if (isContinuous) {
               try { html5QrCode.pause(); } catch (e) {} // อาจหยุดไว้แล้วตอนค้นบริษัทอื่น
               scannedTargetDocId = found.docId;
+              scannedPrev = { status: found.status || '', tag: found.tag || 'มีป้าย' };
               document.getElementById('popupAssetSeq').innerText = '#' + (found.id || '-');
               document.getElementById('popupAssetCode').innerText = found.code;
               document.getElementById('popupAssetName').innerText = found.name;
@@ -2085,6 +2107,7 @@
       }
     }
 
+    let scannedPrev = { status: '', tag: 'มีป้าย' };   // ค่าเดิมของรายการที่สแกน (ไว้เขียนประวัติ)
     async function quickSetStatus(status) {
       if (!scannedTargetDocId) return;
       const targetId = scannedTargetDocId;
@@ -2093,7 +2116,13 @@
 
       db.collection("skyai_assets_v9_clean").doc(targetId).update({
         ...checkFields(status, name),
-        tag: tagVal
+        tag: tagVal,
+        // ประวัติ: บันทึกเฉพาะสิ่งที่เปลี่ยนจริง
+        history: FieldValueImpl.arrayUnion(
+          ...(scannedPrev.status !== status ? [historyEntry('status', scannedPrev.status, status, name)] : []),
+          ...(scannedPrev.tag !== tagVal ? [historyEntry('tag', scannedPrev.tag, tagVal, name)] : []),
+          ...((scannedPrev.status === status && scannedPrev.tag === tagVal) ? [historyEntry('status', status, status, name)] : [])
+        )
       }).then(() => {
         closeQuickPopup();
       }).catch(err => alert("บันทึกไม่สำเร็จ: " + err.message));
@@ -2267,12 +2296,21 @@
 
     async function setStatus(docId, status, currentStatus) {
       const next = currentStatus === status ? '' : status;
-      const name = next ? await ensureInspectorName() : '';
-      db.collection(ASSETS_COL).doc(docId).update(checkFields(next, name))
-        .catch(err => alert("บันทึกไม่สำเร็จ: " + err.message));
+      const name = await ensureInspectorName();   // ยกเลิกก็บันทึกชื่อคนยกเลิกในประวัติ
+      db.collection(ASSETS_COL).doc(docId).update({
+        ...checkFields(next, name),
+        history: addHistory(historyEntry('status', currentStatus, next, name)),
+      }).catch(err => alert("บันทึกไม่สำเร็จ: " + err.message));
     }
 
-    function setTag(docId, val) { updateAssetField(docId, 'tag', val); }
+    async function setTag(docId, val) {
+      const item = assets.find(a => a.docId === docId);
+      const before = item ? (item.tag || '') : '';
+      if (before === val) return;
+      const name = await ensureInspectorName();
+      db.collection(ASSETS_COL).doc(docId).update({ tag: val, history: addHistory(historyEntry('tag', before, val, name)) })
+        .catch(err => alert("บันทึกไม่สำเร็จ: " + err.message));
+    }
     function setRemark(docId, val) { updateAssetField(docId, 'remark', val); }
 
     function compressAndAttachImage(docId, event) {
@@ -2873,7 +2911,12 @@
               </div>
               <h3 class="font-bold text-slate-800 text-sm sm:text-xs mt-1.5 leading-snug">${esc(item.name)}</h3>
               <p class="text-sm sm:text-[11px] font-mono font-bold text-blue-600 mt-0.5"><i class="fa-solid fa-barcode mr-1"></i>${esc(item.code)}</p>
-              ${isChecked(item) && item.checkedBy ? `<p class="text-[11px] text-slate-400 mt-0.5"><i class="fa-solid fa-user-check mr-1"></i>${esc(item.checkedBy)}${item.checkedAt ? ` · ${fmtCheckedAt(item.checkedAt)}` : ''}</p>` : ''}
+              ${(isChecked(item) && item.checkedBy) || (item.history && item.history.length) ? `<p class="text-[11px] text-slate-400 mt-0.5 flex items-center gap-2 flex-wrap">
+                ${isChecked(item) && item.checkedBy ? `<span><i class="fa-solid fa-user-check mr-1"></i>${esc(item.checkedBy)}${item.checkedAt ? ` · ${fmtCheckedAt(item.checkedAt)}` : ''}</span>` : ''}
+                ${item.history && item.history.length ? `<button onclick="toggleHistory(${js(item.docId)})" class="text-blue-600 hover:underline">ประวัติ (${item.history.length}) <i class="fa-solid fa-chevron-${expandedHistory.has(item.docId) ? 'up' : 'down'} text-[9px]"></i></button>` : ''}
+              </p>` : ''}
+              ${expandedHistory.has(item.docId) ? `<ul class="mt-1 text-[11px] text-slate-600 border-l-2 border-slate-200 pl-2 space-y-0.5">${sortedHistory(item).map(h => `
+                <li><span class="text-slate-400 font-mono">${esc(fmtCheckedAt(h.at))}</span> · ${esc(historyText(h))} <span class="text-slate-400">โดย ${esc(h.by)}</span></li>`).join('')}</ul>` : ''}
             </div>
             ${item.status ? `<span class="shrink-0 text-xs sm:text-[10px] font-bold px-2 py-0.5 rounded ${badgeStyle}">${esc(item.status)}</span>`
               : isFoundNoCondition(item) ? `<span class="shrink-0 text-xs sm:text-[10px] font-bold px-2 py-0.5 rounded bg-violet-100 text-violet-800">พบแล้ว</span>` : ''}
@@ -2957,11 +3000,20 @@
         "ประเภทสินทรัพย์": a.category, "เลขทะเบียนทรัพย์สิน": a.code, "ชื่อทรัพย์สิน": a.name,
         "สถานที่ตั้ง": a.location || '-', "ผู้รับผิดชอบ": a.owner, "สถานะป้าย": a.tag,
         "สภาพดี/ปกติ": a.status === 'ดี' ? '✓' : '', "สภาพชำรุด": a.status === 'ชำรุด' ? '✓' : '',
-        "สภาพสูญหาย": a.status === 'สูญหาย' ? '✓' : '', "จำนวนรูปถ่าย": imgCountOf(a) > 0 ? `${imgCountOf(a)} รูป` : 'ไม่มีรูปถ่าย', "ตรวจโดย": isChecked(a) ? (a.checkedBy || '') : '', "วันเวลาที่ตรวจ": isChecked(a) ? fmtCheckedAt(a.checkedAt) : '', "หมายเหตุ": a.remark || ''
+        "สภาพสูญหาย": a.status === 'สูญหาย' ? '✓' : '', "จำนวนรูปถ่าย": imgCountOf(a) > 0 ? `${imgCountOf(a)} รูป` : 'ไม่มีรูปถ่าย', "ตรวจโดย": isChecked(a) ? (a.checkedBy || '') : '', "วันเวลาที่ตรวจ": isChecked(a) ? fmtCheckedAt(a.checkedAt) : '', "ประวัติการแก้ (ครั้ง)": (a.history || []).length, "หมายเหตุ": a.remark || ''
       }));
       const wb = XLSX.utils.book_new();
       const ws = XLSX.utils.json_to_sheet(excelData);
       XLSX.utils.book_append_sheet(wb, ws, "รายงานตรวจนับ");
+      // ชีตประวัติการตรวจ: ทุกการเปลี่ยนแปลง เรียงตามเวลา
+      const hist = [];
+      companyAssets.forEach(a => (a.history || []).forEach(h => hist.push({ a, h })));
+      hist.sort((x, y) => String(x.h.at).localeCompare(String(y.h.at)));
+      const wsH = XLSX.utils.json_to_sheet(hist.length ? hist.map(({ a, h }) => ({
+        "วันเวลา": fmtCheckedAt(h.at), "ลำดับที่": a.id || '', "เลขทะเบียนทรัพย์สิน": a.code, "ชื่อทรัพย์สิน": a.name,
+        "สถานที่ตั้ง": a.location || '-', "การเปลี่ยนแปลง": historyText(h), "โดย": h.by,
+      })) : [{ "หมายเหตุ": 'ยังไม่มีประวัติ (เริ่มเก็บตั้งแต่เปิดใช้ฟีเจอร์นี้)' }]);
+      XLSX.utils.book_append_sheet(wb, wsH, "ประวัติการตรวจ");
       XLSX.writeFile(wb, `รายงานตรวจนับ_${currentCompany}${meta.date ? "_" + meta.date : ""}.xlsx`);
     }
 
