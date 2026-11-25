@@ -3246,7 +3246,11 @@
     function renderSignReport(tabs, title) {
       const multi = tabs.length > 1;
       const rawAll = tabs.flatMap(t => t.list.map(a => ({ ...a, _tab: t.name })));
-      const { all, dupCount, conflicts } = multi ? dedupeAcrossTabs(rawAll, tabs.map(t => t.name)) : { all: rawAll, dupCount: 0, conflicts: [] };
+      const merged = multi ? dedupeAcrossTabs(rawAll, tabs.map(t => t.name)) : { all: rawAll, dupCount: 0, conflicts: [] };
+      // ใบเซ็นรับรองใช้เฉพาะรายการตามทะเบียน · รายการพบนอกทะเบียนเก็บเป็นข้อมูลในแอป/Excel เท่านั้น
+      const all = merged.all.filter(a => a.auditType !== 'นอกสุ่ม');
+      const dupCount = merged.dupCount;
+      const conflicts = merged.conflicts.filter(c => c.win.auditType !== 'นอกสุ่ม');
       const S = signStats(all);
 
       const times = all.map(a => a.checkedAt && typeof a.checkedAt.toDate === 'function' ? a.checkedAt.toDate() : null).filter(Boolean).sort((x, y) => x - y);
@@ -3278,15 +3282,14 @@
       const sev = (a) => (a.status === 'สูญหาย' ? 0 : 1);
       const issues = all.filter(a => a.status === 'ชำรุด' || a.status === 'สูญหาย')
         .sort((a, b) => sev(a) - sev(b) || (Number(a.id) || 0) - (Number(b.id) || 0));
-      const extras = all.filter(a => a.auditType === 'นอกสุ่ม').sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
 
       const perTab = multi ? `
         <div style="margin-top:8px;font-weight:600">แยกตามหน่วยงาน / Tab</div>
         <table class="rpt" style="margin-top:4px"><thead><tr>
           <th>หน่วยงาน / Tab</th><th class="num">ตามทะเบียน</th><th class="num">ตรวจแล้ว</th><th class="num">%</th>
-          <th class="num">ชำรุด</th><th class="num">สูญหาย</th><th class="num">ยังไม่ตรวจ</th><th class="num">พบเพิ่ม</th></tr></thead><tbody>
-          ${tabs.map(t => { const s = signStats(t.list); return row([t.name, n(s.total), n(s.done), { html: s.pct + '%', num: true }, n(s.damage), n(s.lost), n(s.todo), n(s.extras)]); }).join('')}
-          ${row([{ html: `<b>รวม${dupCount ? ' (นับรายการซ้ำครั้งเดียว)' : ''}</b>` }, n(S.total), n(S.done), { html: S.pct + '%', num: true }, n(S.damage), n(S.lost), n(S.todo), n(S.extras)])}
+          <th class="num">ชำรุด</th><th class="num">สูญหาย</th><th class="num">ยังไม่ตรวจ</th></tr></thead><tbody>
+          ${tabs.map(t => { const s = signStats(t.list); return row([t.name, n(s.total), n(s.done), { html: s.pct + '%', num: true }, n(s.damage), n(s.lost), n(s.todo)]); }).join('')}
+          ${row([{ html: `<b>รวม${dupCount ? ' (นับรายการซ้ำครั้งเดียว)' : ''}</b>` }, n(S.total), n(S.done), { html: S.pct + '%', num: true }, n(S.damage), n(S.lost), n(S.todo)])}
         </tbody></table>
         ${dupCount ? `<div style="margin-top:4px;font-size:12px;color:#475569">* พบรายการที่เลขทะเบียนซ้ำกันระหว่าง Tab ${dupCount.toLocaleString()} รายการ — นับครั้งเดียว โดยใช้ผลที่ตรวจแล้ว และถ้าตรวจหลายครั้งใช้ผลล่าสุด</div>` : ''}` : '';
 
@@ -3305,7 +3308,6 @@
           ${row([{ html: '&nbsp;&nbsp;&nbsp;– ชำรุด' }, n(S.damage)])}
           ${row([{ html: '&nbsp;&nbsp;&nbsp;– สูญหาย' }, n(S.lost)])}
           ${row([{ html: S.todo ? '<b style="color:#b45309">ยังไม่ได้ตรวจ</b>' : 'ยังไม่ได้ตรวจ' }, n(S.todo)])}
-          ${row(['พบเพิ่ม (นอกทะเบียน)', n(S.extras)])}
           ${row(['ป้ายชำรุด / ไม่มีป้าย', { html: `${S.tagBroken.toLocaleString()} / ${S.tagMissing.toLocaleString()}`, num: true }])}
         </table>
         ${perTab}
@@ -3313,8 +3315,6 @@
         <h3>2. รายการชำรุด / สูญหาย (${issues.length} รายการ)</h3>
         ${itemTable(issues, a => a.status)}
 
-        <h3>3. รายการที่พบเพิ่ม นอกทะเบียน (${extras.length} รายการ)</h3>
-        ${itemTable(extras, a => a.status || 'พบแล้ว (ไม่ระบุสภาพ)')}
 
         ${conflicts.length ? `
         <h3>รายการที่ผลตรวจไม่ตรงกันระหว่าง Tab (${conflicts.length} รายการ · ใช้ผลล่าสุดในการสรุป)</h3>
@@ -3323,11 +3323,11 @@
             { html: c.list.map(a => `${esc(a._tab)}: ${esc(a.status || 'ยังไม่ตรวจ')}`).join('<br>') }, { html: `<b>${esc(c.win.status)}</b>` }])).join('')}
         </tbody></table>` : ''}
 
-        <h3>4. ผู้ตรวจนับ</h3>
+        <h3>3. ผู้ตรวจนับ</h3>
         <div>${peopleList.length ? peopleList.map(([nm, c]) => `${esc(nm)} (${c.toLocaleString()} รายการ)`).join(', ')
           : (meta.inspector ? esc(meta.inspector) : '........................................')}</div>
 
-        <h3>5. ลงชื่อรับรอง</h3>
+        <h3>4. ลงชื่อรับรอง</h3>
         <div class="sign-block" style="display:grid;grid-template-columns:1fr 1fr;gap:18mm 12mm;margin-top:10mm">
           ${['ผู้ตรวจนับ', 'ผู้ตรวจนับ', 'ผู้ตรวจสอบ (ฝ่ายบัญชี)', 'ผู้อนุมัติ'].map(role => `
             <div style="text-align:center">
