@@ -24,6 +24,7 @@
     @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap');
     body { font-family: 'Sarabun', sans-serif; background-color: #f1f5f9; }
     @media print {
+      html, body { background: #fff !important; }   /* ไม่ให้พื้นเทาของแอปติดไปในหน้าที่ไม่เต็ม */
       body:not(.print-sign) > *:not(#execDash) { display: none !important; }
       body.print-sign > *:not(#signReport) { display: none !important; }
       #signReport { position: static !important; overflow: visible !important; background: #fff !important; }
