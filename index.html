@@ -386,9 +386,13 @@
       <!-- Popup เด้งขึ้นมาเมื่อสแกนเจอเลขในระบบ -->
       <div id="scanQuickPopup" class="hidden absolute inset-x-3 top-16 bg-slate-900/95 text-white p-3.5 rounded-xl shadow-2xl space-y-2.5 z-40 border border-slate-700">
         <div class="text-xs font-bold text-amber-400 flex items-center gap-1">
-          <i class="fa-solid fa-circle-check"></i> สแกนเจอ: <span id="popupAssetCode" class="font-mono text-white"></span>
+          <i class="fa-solid fa-circle-check"></i> สแกนเจอ:
+          <span id="popupAssetSeq" class="bg-white text-slate-900 font-mono px-1.5 py-0.5 rounded"></span>
+          <span id="popupAssetCode" class="font-mono text-white"></span>
+          <span id="popupAssetStatus" class="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded hidden"></span>
         </div>
         <div id="popupAssetName" class="text-[11px] text-slate-300 truncate"></div>
+        <div id="popupAssetLoc" class="text-[11px] text-slate-400 truncate"></div>
 
         <div>
           <label class="block text-[10px] text-slate-400 mb-1">เลือกสภาพทรัพย์สิน:</label>
@@ -1676,8 +1680,18 @@
             if (isContinuous) {
               try { html5QrCode.pause(); } catch (e) {} // อาจหยุดไว้แล้วตอนค้นบริษัทอื่น
               scannedTargetDocId = found.docId;
+              document.getElementById('popupAssetSeq').innerText = '#' + (found.id || '-');
               document.getElementById('popupAssetCode').innerText = found.code;
               document.getElementById('popupAssetName').innerText = found.name;
+              document.getElementById('popupAssetLoc').innerText = '📍 ' + (found.location || '-');
+              // ถ้าเคยตรวจแล้ว บอกสถานะเดิมให้รู้ (กันกดซ้ำโดยไม่ตั้งใจ)
+              const st = document.getElementById('popupAssetStatus');
+              st.classList.toggle('hidden', !found.status);
+              st.innerText = found.status ? `ตรวจแล้ว: ${found.status}` : '';
+              st.className = `ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded ${found.status ? '' : 'hidden'} ` +
+                (found.status === 'ดี' ? 'bg-emerald-600' : found.status === 'ชำรุด' ? 'bg-amber-600' : found.status === 'สูญหาย' ? 'bg-red-600' : '');
+              // ตั้งสถานะป้ายตามรายการนี้ (เดิมค้างค่าจากรายการที่สแกนก่อนหน้า)
+              document.getElementById('popupTagSelect').value = found.tag || 'มีป้าย';
               document.getElementById('scanQuickPopup').classList.remove('hidden');
             } else {
               closeScannerModal();
