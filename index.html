@@ -1099,7 +1099,7 @@
         if (!byFloor[key]) { byFloor[key] = { fk, locs: [] }; order.push(key); }
         byFloor[key].locs.push(loc);
       });
-      order.sort((a, b) => String(byFloor[a].fk || byFloor[a].locs[0]).localeCompare(String(byFloor[b].fk || byFloor[b].locs[0]), 'th', { numeric: true }));
+      order.sort((a, b) => (!!byFloor[b].fk - !!byFloor[a].fk) || String(byFloor[a].fk || byFloor[a].locs[0]).localeCompare(String(byFloor[b].fk || byFloor[b].locs[0]), 'th', { numeric: true }));
 
       container.innerHTML = order.map(key => {
         const g = byFloor[key];
