@@ -13,8 +13,6 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <!-- JSZip for Download All Images -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-  <!-- Chart.js for Dashboard -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <!-- Html5-Qrcode Scanner -->
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js" type="text/javascript"></script>
 
@@ -127,22 +125,18 @@
     </div>
 
     <!-- Executive Summary Dashboard -->
-    <div class="bg-white rounded-xl p-3.5 shadow-sm border border-slate-200 space-y-3">
+    <div class="bg-white rounded-xl p-3.5 shadow-sm border border-slate-200 space-y-2.5">
       <div class="flex justify-between items-center text-xs">
         <span class="font-bold text-slate-700"><i class="fa-solid fa-chart-pie text-blue-600 mr-1"></i> สรุปผลการตรวจนับ (<span id="activeCompanyLabel">SKYAI</span>)</span>
         <span id="progressBadge" class="font-bold bg-blue-50 text-blue-700 px-2.5 py-0.5 rounded-full">0 / 0 (0%)</span>
       </div>
 
-      <!-- แถบความคืบหน้า + สรุปบรรทัดเดียว (มือถือ) -->
-      <div class="h-2 bg-slate-100 rounded-full overflow-hidden">
-        <div id="progressBar" class="h-full bg-emerald-600 transition-all" style="width:0%"></div>
-      </div>
-      <div class="flex sm:hidden items-center gap-3 text-xs text-slate-600">
-        <span>ดี <b id="mGood" class="text-emerald-700">0</b></span>
-        <span>ชำรุด <b id="mDamage" class="text-amber-700">0</b></span>
-        <span>สูญหาย <b id="mLost" class="text-red-700">0</b></span>
-        <button onclick="toggleDashDetails()" id="dashToggleBtn" class="ml-auto text-blue-600 font-medium py-1">ดูกราฟ <i class="fa-solid fa-chevron-down text-[10px]"></i></button>
-      </div>
+      <!-- แถบเดียวแบ่งสี: ดี / ชำรุด / สูญหาย / ยังไม่ตรวจ -->
+      <div id="statusBar" class="flex h-3 bg-slate-200 rounded-full overflow-hidden"></div>
+      <!-- ตัวเลขแต่ละสถานะ (กดแล้วกรองรายการ) -->
+      <div id="statusLegend" class="flex flex-wrap gap-1 text-xs"></div>
+      <!-- สถานะป้าย / สุ่ม / เพิ่มใหม่ / มีรูป (กดแล้วกรองรายการ) -->
+      <div id="dashExtras" class="space-y-1 text-xs border-t border-slate-100 pt-2"></div>
 
       <!-- ความคืบหน้าแยกตามสถานที่ (พับไว้ กดเพื่อกาง) -->
       <div>
@@ -153,37 +147,6 @@
         <div id="locProgressList" class="hidden mt-2 max-h-72 overflow-y-auto space-y-1 pr-1"></div>
       </div>
 
-      <div id="dashDetails" class="hidden sm:block space-y-3">
-      <div class="grid grid-cols-4 gap-1.5 text-center text-xs">
-        <div class="bg-slate-50 p-2 rounded-lg border border-slate-100">
-          <div id="cntTotal" class="text-sm font-bold text-slate-800">0</div>
-          <div class="text-[10px] text-slate-500">ทั้งหมด</div>
-        </div>
-        <div class="bg-emerald-50 p-2 rounded-lg border border-emerald-100">
-          <div id="cntGood" class="text-sm font-bold text-emerald-600">0</div>
-          <div class="text-[10px] text-emerald-700">สภาพดี</div>
-        </div>
-        <div class="bg-amber-50 p-2 rounded-lg border border-amber-100">
-          <div id="cntDamage" class="text-sm font-bold text-amber-600">0</div>
-          <div class="text-[10px] text-amber-700">ชำรุด</div>
-        </div>
-        <div class="bg-red-50 p-2 rounded-lg border border-red-100">
-          <div id="cntLost" class="text-sm font-bold text-red-600">0</div>
-          <div class="text-[10px] text-red-700">สูญหาย</div>
-        </div>
-      </div>
-
-      <div class="flex justify-between items-center text-[11px] bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100">
-        <span class="text-slate-600">🎯 รายการสุ่ม: <strong id="cntSampled" class="text-slate-800">0</strong></span>
-        <span class="text-purple-700">➕ เพิ่มใหม่ (นอกสุ่ม): <strong id="cntExtra" class="text-purple-900">0</strong></span>
-      </div>
-
-      <div class="pt-2 border-t border-slate-100">
-        <div class="h-36 w-full relative">
-          <canvas id="dashboardChart"></canvas>
-        </div>
-      </div>
-      </div>
     </div>
 
     <!-- Search, Location Filter, Add Extra & Scanner Bar -->
@@ -217,6 +180,14 @@
                 <input type="checkbox" id="photoOnlyChk" onchange="onPhotoOnlyChange(this.checked)" class="rounded text-blue-600 focus:ring-0"> 📸 เฉพาะที่มีรูป
               </span>
               <span id="photoOnlyCount" class="text-[10px] text-slate-400 font-mono"></span>
+            </label>
+            <label class="flex items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-xs">
+              <span class="text-slate-700 font-medium whitespace-nowrap">🏷️ สถานะป้าย</span>
+              <select id="tagFilterSelect" onchange="setTagFilter(this.value, false)" class="bg-white border border-slate-200 rounded px-1.5 py-1 text-xs text-slate-700 focus:outline-none">
+                <option value="">ทั้งหมด</option>
+                <option value="ป้ายชำรุด">⚠️ ป้ายชำรุด</option>
+                <option value="ไม่มีป้าย">❌ ไม่มีป้าย</option>
+              </select>
             </label>
             <div class="text-[11px] font-bold text-slate-500 pt-1">📍 สถานที่ (เลือกได้หลายอัน)</div>
 
@@ -508,6 +479,7 @@
     let currentFilter = 'all';
     let selectedLocations = [];
     let onlyWithPhotos = false;   // ตัวกรอง "เฉพาะที่มีรูป" (อยู่ในปุ่มตัวกรอง)
+    let tagFilter = '';           // ตัวกรองสถานะป้าย: '' | 'ป้ายชำรุด' | 'ไม่มีป้าย'
     let lastUsedLocation = '';
     let pendingExtraImages = [];
     let lastScannedRawCode = '';
@@ -515,7 +487,6 @@
     let duplicateMatchDocId = null;
     let currentPage = 1;
     const itemsPerPage = 25;
-    let myChart = null;
     let html5QrCode = null;
     let currentTrack = null;
     let companyMetadata = {};
@@ -556,14 +527,6 @@
       card.classList.toggle('hidden', !show);
       if (show) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
-    function toggleDashDetails() {
-      const d = document.getElementById('dashDetails');
-      const open = d.classList.toggle('hidden') === false;
-      document.getElementById('dashToggleBtn').innerHTML = open
-        ? 'ซ่อนกราฟ <i class="fa-solid fa-chevron-up text-[10px]"></i>'
-        : 'ดูกราฟ <i class="fa-solid fa-chevron-down text-[10px]"></i>';
-      if (open && myChart) myChart.resize();
-    }
     // การ์ดที่กางส่วน "ป้าย / หมายเหตุ" ไว้ (จำไว้ เพราะรายการถูกวาดใหม่ทุกครั้งที่ข้อมูลเปลี่ยน)
     const expandedCards = new Set();
     function toggleCardExtra(docId) {
@@ -572,7 +535,6 @@
     }
 
     window.onload = function() {
-      initChart();
       syncLocationFilterLabel();
 
       const savedMeta = localStorage.getItem('skyai_meta');
@@ -1133,6 +1095,7 @@
       syncLocationFilterLabel();
       currentPage = 1;
       renderList();
+      updateDashboard();
     }
 
     function onLocationCheckboxChange() {
@@ -1177,15 +1140,19 @@
       const label = document.getElementById('locationFilterLabel');
       const btn = document.getElementById('locationFilterBtn');
       const icon = document.getElementById('locationFilterIcon');
-      const nActive = selectedLocations.length + (onlyWithPhotos ? 1 : 0);
+      const nActive = selectedLocations.length + (onlyWithPhotos ? 1 : 0) + (tagFilter ? 1 : 0);
       const active = nActive > 0;
+      const tagSel = document.getElementById('tagFilterSelect');
+      if (tagSel) tagSel.value = tagFilter;
       if (!active) {
         label.innerText = 'ตัวกรอง';
+      } else if (nActive === 1 && tagFilter) {
+        label.innerText = `🏷️ ${tagFilter}`;
       } else if (nActive === 1 && onlyWithPhotos) {
         label.innerText = '📸 มีรูป';
       } else if (nActive === 1) {
         label.innerText = selectedLocations[0];
-      } else if (!onlyWithPhotos && selectedLocations.every(l => floorKeyOf(l) && floorKeyOf(l) === floorKeyOf(selectedLocations[0]))) {
+      } else if (!onlyWithPhotos && !tagFilter && selectedLocations.every(l => floorKeyOf(l) && floorKeyOf(l) === floorKeyOf(selectedLocations[0]))) {
         label.innerText = `${floorKeyOf(selectedLocations[0])} (${selectedLocations.length} ที่)`;
       } else {
         label.innerText = `กรอง ${nActive} อย่าง`;
@@ -1211,6 +1178,7 @@
     function clearAllFilters() {
       selectedLocations = [];
       onlyWithPhotos = false;
+      tagFilter = '';
       currentFilter = 'all';
       document.getElementById('searchInput').value = '';
       const kwInput = document.getElementById('locationKeywordInput');
@@ -1224,6 +1192,7 @@
       renderLocationCheckboxes();
       currentPage = 1;
       renderList();
+      updateDashboard();
     }
 
     async function renameCurrentCompany() {
@@ -1987,6 +1956,7 @@
       currentPage = 1;
       selectedLocations = [];
       onlyWithPhotos = false;
+      tagFilter = '';
       syncLocationFilterLabel();
       updateCompanyTabs();
       syncMetaUI();
@@ -2115,42 +2085,70 @@
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
     }
 
-    function initChart() {
-      const ctx = document.getElementById('dashboardChart').getContext('2d');
-      myChart = new Chart(ctx, {
-        type: 'bar',
-        data: { labels: ['สภาพดี', 'ชำรุด', 'สูญหาย'], datasets: [{ label: 'จำนวน', data: [0, 0, 0], backgroundColor: ['#059669', '#d97706', '#dc2626'] }] },
-        options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } }, plugins: { legend: { display: false } } }
-      });
+    // เลื่อนลงไปที่รายการ หลังกดตัวเลขในสรุปผล
+    function goToList() {
+      document.getElementById('stickySearchBar').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    function setTagFilter(tag, scroll = true) {
+      tagFilter = tag || '';
+      syncLocationFilterLabel();
+      currentPage = 1;
+      renderList();
+      updateDashboard();
+      if (scroll) goToList();
+    }
+    function showOnlyWithPhotos() {
+      onPhotoOnlyChange(true);
+      renderLocationCheckboxes();
+      updateDashboard();
+      goToList();
     }
 
     function updateDashboard() {
       const companyAssets = assets.filter(a => a.company === currentCompany);
       const total = companyAssets.length;
-      const good = companyAssets.filter(a => a.status === 'ดี').length;
-      const damage = companyAssets.filter(a => a.status === 'ชำรุด').length;
-      const lost = companyAssets.filter(a => a.status === 'สูญหาย').length;
-      const sampled = companyAssets.filter(a => (a.auditType || 'สุ่ม') === 'สุ่ม').length;
-      const extra = companyAssets.filter(a => a.auditType === 'นอกสุ่ม').length;
-      const done = good + damage + lost;
+      const count = (fn) => companyAssets.filter(fn).length;
+      const good = count(a => a.status === 'ดี');
+      const damage = count(a => a.status === 'ชำรุด');
+      const lost = count(a => a.status === 'สูญหาย');
+      const todo = total - good - damage - lost;
+      const done = total - todo;
       const pct = total > 0 ? Math.round((done / total) * 100) : 0;
-
-      document.getElementById('cntTotal').innerText = total;
-      document.getElementById('cntGood').innerText = good;
-      document.getElementById('cntDamage').innerText = damage;
-      document.getElementById('cntLost').innerText = lost;
-      document.getElementById('cntSampled').innerText = sampled;
-      document.getElementById('cntExtra').innerText = extra;
       document.getElementById('progressBadge').innerText = `${done} / ${total} (${pct}%)`;
-      document.getElementById('progressBar').style.width = pct + '%';
-      document.getElementById('mGood').innerText = good;
-      document.getElementById('mDamage').innerText = damage;
-      document.getElementById('mLost').innerText = lost;
 
-      if (myChart) {
-        myChart.data.datasets[0].data = [good, damage, lost];
-        myChart.update();
-      }
+      // แถบเดียวแบ่งสี (ส่วนที่เหลือเป็นพื้นเทา = ยังไม่ตรวจ)
+      const seg = (n, cls) => n > 0 ? `<div class="${cls} h-full" style="width:${(n / total * 100).toFixed(2)}%"></div>` : '';
+      document.getElementById('statusBar').innerHTML = total
+        ? seg(good, 'bg-emerald-600') + seg(damage, 'bg-amber-500') + seg(lost, 'bg-red-600') : '';
+
+      // ตัวเลขแต่ละสถานะ: กดแล้วกรองรายการ (กดซ้ำ = ยกเลิก)
+      const chip = (key, label, n, dot) => {
+        const on = currentFilter === key;
+        return `<button onclick="filterStatus('${on ? 'all' : key}'); goToList()" class="flex items-center gap-1.5 px-2 py-1 rounded-md border ${on ? 'bg-blue-50 border-blue-300' : 'border-transparent hover:bg-slate-50'}">
+          <span class="w-2.5 h-2.5 rounded-full ${dot}"></span><span class="text-slate-600">${label}</span> <b class="text-slate-800">${n}</b></button>`;
+      };
+      document.getElementById('statusLegend').innerHTML =
+        chip('ดี', 'ดี', good, 'bg-emerald-600') + chip('ชำรุด', 'ชำรุด', damage, 'bg-amber-500') +
+        chip('สูญหาย', 'สูญหาย', lost, 'bg-red-600') + chip('ยังไม่ตรวจ', 'ยังไม่ตรวจ', todo, 'bg-slate-300');
+
+      // สถานะป้าย + สุ่ม/เพิ่มใหม่/มีรูป
+      const tagBroken = count(a => a.tag === 'ป้ายชำรุด');
+      const tagMissing = count(a => a.tag === 'ไม่มีป้าย');
+      const sampled = count(a => (a.auditType || 'สุ่ม') === 'สุ่ม');
+      const extra = count(a => a.auditType === 'นอกสุ่ม');
+      const withPhotos = count(a => imgCountOf(a) > 0);
+      const link = (on, onclick, text) => `<button onclick="${onclick}" class="px-1.5 py-0.5 rounded ${on ? 'bg-blue-50 text-blue-700 ring-1 ring-blue-300' : 'hover:bg-slate-50 text-slate-700'}">${text}</button>`;
+      const tagLine = (tagBroken || tagMissing)
+        ? link(tagFilter === 'ป้ายชำรุด', `setTagFilter('${tagFilter === 'ป้ายชำรุด' ? '' : 'ป้ายชำรุด'}')`, `ชำรุด <b>${tagBroken}</b>`) + '<span class="text-slate-300">·</span>' +
+          link(tagFilter === 'ไม่มีป้าย', `setTagFilter('${tagFilter === 'ไม่มีป้าย' ? '' : 'ไม่มีป้าย'}')`, `ไม่มีป้าย <b>${tagMissing}</b>`)
+        : '<span class="text-slate-500 px-1.5">ครบทุกรายการ ✓</span>';
+      document.getElementById('dashExtras').innerHTML = `
+        <div class="flex items-center flex-wrap gap-0.5"><span class="text-slate-500 w-16 shrink-0">🏷️ ป้าย</span>${tagLine}</div>
+        <div class="flex items-center flex-wrap gap-0.5"><span class="text-slate-500 w-16 shrink-0">📋 อื่นๆ</span>${
+          link(currentFilter === 'สุ่ม', `filterStatus('${currentFilter === 'สุ่ม' ? 'all' : 'สุ่ม'}'); goToList()`, `🎯 สุ่ม <b>${sampled}</b>`)}<span class="text-slate-300">·</span>${
+          link(currentFilter === 'นอกสุ่ม', `filterStatus('${currentFilter === 'นอกสุ่ม' ? 'all' : 'นอกสุ่ม'}'); goToList()`, `➕ เพิ่มใหม่ <b>${extra}</b>`)}<span class="text-slate-300">·</span>${
+          link(onlyWithPhotos, onlyWithPhotos ? 'onPhotoOnlyChange(false); renderLocationCheckboxes(); updateDashboard()' : 'showOnlyWithPhotos()', `📸 มีรูป <b>${withPhotos}</b>`)}</div>`;
+
       renderLocProgress(companyAssets);
     }
 
@@ -2267,6 +2265,7 @@
       document.querySelectorAll('.filter-tab').forEach(btn => btn.className = "filter-tab px-3 py-1.5 sm:py-1 rounded-md font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap");
       document.getElementById('tab-' + status).className = "filter-tab px-3 py-1.5 sm:py-1 rounded-md font-medium bg-blue-600 text-white whitespace-nowrap shadow-sm";
       renderList();
+      updateDashboard();
     }
 
     function updateTabCounts() {
@@ -2308,8 +2307,9 @@
         else if (currentFilter === 'นอกสุ่ม') matchStatus = item.auditType === 'นอกสุ่ม';
 
         const matchPhoto = !onlyWithPhotos || imgCountOf(item) > 0;
+        const matchTag = !tagFilter || item.tag === tagFilter;
 
-        return matchQuery && matchLocation && matchStatus && matchPhoto;
+        return matchQuery && matchLocation && matchStatus && matchPhoto && matchTag;
       });
 
       if (query && filtered.length === 0) {
@@ -2321,7 +2321,7 @@
 
       // แสดง Chips สถานที่ที่กำลังกรอง + ปุ่ม Clear
       const chipsContainer = document.getElementById('activeFilterChips');
-      if (selectedLocations.length > 0 || onlyWithPhotos || currentFilter !== 'all' || query) {
+      if (selectedLocations.length > 0 || onlyWithPhotos || tagFilter || currentFilter !== 'all' || query) {
         // ไม่แสดงป้ายรายชื่อสถานที่แล้ว (รกเมื่อเลือกหลายที่) จำนวนที่กรองดูได้ที่ปุ่มกรองสถานที่
         let chipsHtml = '';
         chipsHtml +=`<button onclick="clearAllFilters()" class="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 text-[11px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1"><i class="fa-solid fa-rotate-left"></i> Clear กรอง</button>`;
