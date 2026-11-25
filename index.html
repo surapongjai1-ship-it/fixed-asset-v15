@@ -2237,8 +2237,9 @@
         const p = execPct(r.total - r.todo, r.total);
         const notes = [];
         if (r.todo) notes.push(`<span class="text-slate-500">ค้าง ${r.todo.toLocaleString()}</span>`);
-        if (r.damage) notes.push(`<span class="text-amber-600 font-bold">⚠ ชำรุด ${r.damage}</span>`);
-        if (r.lost) notes.push(`<span class="text-red-600 font-bold">⚠ หาย ${r.lost}</span>`);
+        const jump = `role="button" onclick="event.stopPropagation(); execJumpToGroup(${js(r.company)})"`;
+        if (r.damage) notes.push(`<span ${jump} class="text-amber-600 font-bold underline decoration-dotted underline-offset-2 hover:text-amber-700">⚠ ชำรุด ${r.damage}</span>`);
+        if (r.lost) notes.push(`<span ${jump} class="text-red-600 font-bold underline decoration-dotted underline-offset-2 hover:text-red-700">⚠ หาย ${r.lost}</span>`);
         return `
           <button onclick="execOpenCompany(${js(r.company)})" class="w-full text-left grid grid-cols-[minmax(0,7rem)_1fr_auto] sm:grid-cols-[10rem_1fr_3rem_14rem] items-center gap-x-3 gap-y-0.5 px-2 py-2 rounded-lg hover:bg-slate-50" title="เปิดรายการของบริษัทนี้">
             <span class="font-bold text-slate-800 text-sm truncate">${esc(r.company)}</span>
@@ -2248,17 +2249,33 @@
           </button>`;
       }).join('');
 
-      const exRows = [...exceptions].sort((a, b) =>
-        String(a.status).localeCompare(String(b.status), 'th') || String(a.company).localeCompare(String(b.company), 'th') || String(a.code).localeCompare(String(b.code))
-      ).map(x => `
-          <tr class="border-t border-slate-100 align-top">
-            <td class="px-2 py-1.5 whitespace-nowrap"><span class="text-[11px] font-bold px-2 py-0.5 rounded ${x.status === 'สูญหาย' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-800'}">${esc(x.status)}</span></td>
-            <td class="px-2 py-1.5 whitespace-nowrap text-slate-600">${esc(x.company)}</td>
-            <td class="px-2 py-1.5 font-mono text-blue-700 whitespace-nowrap">${esc(x.code)}</td>
-            <td class="px-2 py-1.5 text-slate-800 min-w-[160px]">${esc(x.name)}</td>
-            <td class="px-2 py-1.5 text-slate-600 min-w-[110px]">${esc(x.location || '-')}</td>
-            <td class="px-2 py-1.5 text-slate-500 min-w-[110px]">${esc(x.remark || '')}</td>
-          </tr>`).join('');
+      // จัดกลุ่มตามบริษัท: บริษัทที่มีปัญหามากสุดขึ้นก่อน, ในกลุ่ม สูญหาย ก่อน ชำรุด
+      const exGroups = {};
+      exceptions.forEach(x => (exGroups[x.company] = exGroups[x.company] || []).push(x));
+      const exOrder = Object.keys(exGroups).sort((a, b) =>
+        exGroups[b].length - exGroups[a].length || String(a).localeCompare(String(b), 'th'));
+      const sev = (x) => (x.status === 'สูญหาย' ? 0 : 1);
+      const exHtml = exOrder.map(c => {
+        const list = exGroups[c].sort((a, b) => sev(a) - sev(b) || String(a.code).localeCompare(String(b.code)));
+        const nLost = list.filter(x => x.status === 'สูญหาย').length, nDmg = list.length - nLost;
+        const head = [nDmg ? `ชำรุด ${nDmg}` : '', nLost ? `หาย ${nLost}` : ''].filter(Boolean).join(' · ');
+        return `
+          <div id="exg-${esc(c)}" class="scroll-mt-4">
+            <div class="flex items-baseline gap-2 bg-slate-50 rounded-md px-2 py-1.5 mt-2">
+              <span class="font-bold text-slate-800 text-sm">${esc(c)}</span><span class="text-[11px] text-slate-500">${head}</span>
+            </div>
+            <table class="w-full text-xs"><tbody>
+              ${list.map(x => `
+              <tr class="border-b border-slate-100 last:border-0 align-top">
+                <td class="pl-2 pr-1 py-1.5 w-16 whitespace-nowrap"><span class="text-[11px] font-bold px-1.5 py-0.5 rounded ${x.status === 'สูญหาย' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-800'}">${esc(x.status)}</span></td>
+                <td class="px-1 py-1.5">
+                  <div class="text-slate-800">${esc(x.name)}</div>
+                  <div class="text-[11px] text-slate-500"><span class="font-mono text-blue-700">${esc(x.code)}</span> · 📍 ${esc(x.location || '-')}${x.remark ? ` · 📝 ${esc(x.remark)}` : ''}</div>
+                </td>
+              </tr>`).join('')}
+            </tbody></table>
+          </div>`;
+      }).join('');
 
       document.getElementById('execBody').innerHTML = `
         <div class="grid grid-cols-3 gap-2 sm:gap-3">
@@ -2278,14 +2295,21 @@
             <span class="text-xs text-blue-600 no-print">${exceptions.length ? 'ดูรายละเอียด <i class="fa-solid fa-chevron-down text-[10px] group-open:rotate-180 transition-transform"></i>' : ''}</span>
           </summary>
           <div class="mt-2">
-          ${exceptions.length ? `<div class="overflow-x-auto -mx-1"><table class="w-full text-xs">
-            <thead><tr class="text-[11px] text-slate-500 text-left">
-              <th class="px-2 py-1 font-medium">สถานะ</th><th class="px-2 py-1 font-medium">บริษัท</th><th class="px-2 py-1 font-medium">เลขทะเบียน</th>
-              <th class="px-2 py-1 font-medium">ชื่อทรัพย์สิน</th><th class="px-2 py-1 font-medium">สถานที่</th><th class="px-2 py-1 font-medium">หมายเหตุ</th>
-            </tr></thead><tbody>${exRows}</tbody></table></div>`
+          ${exceptions.length ? exHtml
             : `<div class="text-center text-emerald-600 text-sm py-2">✓ ไม่มีรายการชำรุดหรือสูญหาย</div>`}
           </div>
         </details>`;
+    }
+
+    function execJumpToGroup(company) {
+      const d = document.getElementById('execExceptions');
+      if (d) d.open = true;
+      const el = document.getElementById('exg-' + company) // id ใน HTML ถูกถอด entity แล้ว จึงใช้ชื่อดิบ;
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        el.classList.add('ring-2', 'ring-blue-300', 'rounded-md');
+        setTimeout(() => el.classList.remove('ring-2', 'ring-blue-300', 'rounded-md'), 1500);
+      }
     }
 
     // ตอนพิมพ์ / บันทึก PDF ให้กางรายการชำรุด/สูญหายออกเสมอ แล้วคืนค่าเดิมหลังพิมพ์
