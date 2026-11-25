@@ -3174,6 +3174,7 @@
     }
     function showPrintDoc(label, landscape, bodyHtml, warnHtml) {
       document.getElementById('signReportBody').innerHTML = bodyHtml;
+      document.getElementById('signReportBody').style.fontSize = '';
       const warn = document.getElementById('signReportWarn');
       warn.innerHTML = warnHtml || '';
       warn.classList.toggle('hidden', !warnHtml);
@@ -3192,21 +3193,23 @@
       const pct = sampled.length ? Math.round(done / sampled.length * 100) : 0;
       const statusText = (a) => a.status || (isFoundNoCondition(a) ? 'พบแล้ว' : 'ยังไม่ตรวจ');
       const when = (v) => { const d = v && typeof v.toDate === 'function' ? v.toDate() : null; return d ? d.toLocaleString('th-TH', { day: 'numeric', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''; };
+      // แนวตั้ง: รวม "ประเภท" ไว้ในช่องสถานะ และ "ตรวจโดย + วันเวลา" ไว้ช่องเดียว
       const body = list.map((a, i) => `
         <tr class="${a.status === 'ชำรุด' || a.status === 'สูญหาย' ? 'bad' : ''}">
-          <td class="num">${esc(a.id || i + 1)}</td><td>${esc(a.code)}</td><td>${esc(a.name)}</td><td>${esc(a.location || '-')}</td>
-          <td>${a.auditType === 'นอกสุ่ม' ? 'เพิ่มใหม่' : 'สุ่ม'}</td><td>${esc(statusText(a))}</td><td>${esc(a.tag || '')}</td>
-          <td>${isChecked(a) ? esc(a.checkedBy || '') : ''}</td><td style="white-space:nowrap">${isChecked(a) ? esc(when(a.checkedAt)) : ''}</td><td>${esc(a.remark || '')}</td>
+          <td class="num">${esc(a.id || i + 1)}</td><td style="white-space:nowrap">${esc(a.code)}</td><td>${esc(a.name)}</td><td>${esc(a.location || '-')}</td>
+          <td style="white-space:nowrap">${esc(statusText(a))}${a.auditType === 'นอกสุ่ม' ? '<div style="color:#7c3aed;font-size:9px">เพิ่มใหม่</div>' : ''}</td><td style="white-space:nowrap">${esc(a.tag || '')}</td>
+          <td style="white-space:nowrap">${isChecked(a) && a.checkedBy ? `${esc(a.checkedBy)}<div style="color:#64748b;font-size:9px;white-space:nowrap">${esc(when(a.checkedAt))}</div>` : ''}</td><td>${esc(a.remark || '')}</td>
         </tr>`).join('');
-      showPrintDoc('📄 รายงานตรวจนับ (PDF)', true, `
-        <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap">
+      showPrintDoc('📄 รายงานตรวจนับ (PDF)', false, `
+        <div style="display:flex;flex-direction:column;gap:2px">
           <div><div style="font-size:16px;font-weight:700">รายงานการตรวจนับทรัพย์สินถาวร — ${esc(currentCompany)}</div>
             <div style="color:#475569">พิมพ์เมื่อ ${esc(new Date().toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' }))} · ทั้งหมด ${list.length.toLocaleString()} รายการ (ตามทะเบียน ${sampled.length.toLocaleString()} · เพิ่มใหม่ ${(list.length - sampled.length).toLocaleString()})</div></div>
           <div style="font-weight:600">ตรวจแล้ว ${done.toLocaleString()}/${sampled.length.toLocaleString()} (${pct}%) · ดี ${good} · ชำรุด ${dmg} · สูญหาย ${lost} · ยังไม่ตรวจ ${sampled.length - done}</div>
         </div>
         <table class="rpt" style="margin-top:8px"><thead><tr>
-          <th class="num">ลำดับ</th><th>เลขทะเบียน</th><th>ชื่อทรัพย์สิน</th><th>สถานที่</th><th>ประเภท</th><th>สถานะ</th><th>ป้าย</th><th>ตรวจโดย</th><th>วันเวลา</th><th>หมายเหตุ</th>
+          <th class="num">ลำดับ</th><th style="white-space:nowrap">เลขทะเบียน</th><th style="width:34%">ชื่อทรัพย์สิน</th><th>สถานที่</th><th>สถานะ</th><th>ป้าย</th><th style="white-space:nowrap">ตรวจโดย</th><th>หมายเหตุ</th>
         </tr></thead><tbody>${body}</tbody></table>`, pdfHint);
+      document.getElementById('signReportBody').style.fontSize = '10.5px';
     }
 
     // PDF: รายการป้ายต้องทำใหม่ — จัดกลุ่มตามชั้น มีช่องติ๊ก "ติดแล้ว"
@@ -3429,6 +3432,7 @@
       warn.innerHTML = S.todo ? `⚠️ ยังมีรายการที่ <b>ยังไม่ได้ตรวจ ${S.todo.toLocaleString()} รายการ</b> — ในรายงานจะระบุตัวเลขนี้ไว้ ควรตรวจให้ครบก่อนพิมพ์ฉบับจริง` : '';
       warn.classList.toggle('hidden', !S.todo);
       setPrintDoc('📝 รายงานเซ็นรับรอง', false);
+      document.getElementById('signReportBody').style.fontSize = '';
       document.getElementById('signReport').classList.remove('hidden');
       document.body.style.overflow = 'hidden';
     }
