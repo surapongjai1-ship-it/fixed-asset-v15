@@ -313,7 +313,7 @@
               <option value="ดี">ดี</option>
               <option value="ชำรุด">ชำรุด</option>
               <option value="สูญหาย">สูญหาย</option>
-              <option value="">ยังไม่ระบุ</option>
+              <option value="">ไม่ระบุสภาพ (พบแล้ว)</option>
             </select>
           </div>
           <div>
@@ -1030,6 +1030,11 @@
     // --- รูปถ่ายเก็บแยกคอลเลกชัน: รายการเก็บแค่ imageCount, ตัวรูปโหลดเฉพาะตอนเปิดดู ---
     // รูปแบบเดิม (images ฝังในรายการ) ยังอ่านได้ จนกว่าจะย้ายครบ
     const IMAGES_COL = "skyai_asset_images_v1";
+    // ตรวจแล้วหรือยัง: มีสถานะ หรือเป็นรายการเพิ่มใหม่ (เพิ่มได้เพราะเจอของจริงแล้ว)
+    function isChecked(a) { return !!(a && (a.status || a.auditType === 'นอกสุ่ม')); }
+    // เพิ่มใหม่แต่ไม่ได้ระบุสภาพ
+    function isFoundNoCondition(a) { return !!(a && !a.status && a.auditType === 'นอกสุ่ม'); }
+
     function imgCountOf(item) {
       return ((item && item.images) || []).length + ((item && item.imageCount) || 0);
     }
@@ -1228,7 +1233,7 @@
       });
     }
 
-    function saveExtraAsset() {
+    async function saveExtraAsset() {
       const codeOnly = String(document.getElementById('extraCodeInput').value || '').trim();
       if (!codeOnly) {
         alert("กรุณากรอกหรือสแกนเลขทะเบียนก่อนครับ");
@@ -1259,6 +1264,7 @@
 
       const extraImages = pendingExtraImages.slice();
       const extraAsset = { docId, company: currentCompany, code: codeOnly };
+      const inspector = await ensureInspectorName();
       db.collection("skyai_assets_v9_clean").doc(docId).set({
         id: nextId,
         company: currentCompany,
@@ -1272,6 +1278,8 @@
         imageCount: 0,
         remark: remarkVal,
         auditType: 'นอกสุ่ม',
+        checkedBy: inspector,
+        checkedAt: FieldValueImpl.serverTimestamp(),
         createdAt: new Date().toISOString()
       }).then(() => extraImages.length ? addImagesToAsset(extraAsset, extraImages) : null).then(() => {
         closeAddExtraModal();
@@ -2400,7 +2408,8 @@
       const good = count(a => a.status === 'ดี');
       const damage = count(a => a.status === 'ชำรุด');
       const lost = count(a => a.status === 'สูญหาย');
-      const todo = total - good - damage - lost;
+      const found = count(isFoundNoCondition);           // เพิ่มใหม่ ไม่ระบุสภาพ (นับว่าตรวจแล้ว)
+      const todo = total - good - damage - lost - found;
       const done = total - todo;
       const pct = total > 0 ? Math.round((done / total) * 100) : 0;
       document.getElementById('progressBadge').innerText = `${done} / ${total} (${pct}%)`;
@@ -2408,7 +2417,7 @@
       // แถบเดียวแบ่งสี (ส่วนที่เหลือเป็นพื้นเทา = ยังไม่ตรวจ)
       const seg = (n, cls) => n > 0 ? `<div class="${cls} h-full" style="width:${(n / total * 100).toFixed(2)}%"></div>` : '';
       document.getElementById('statusBar').innerHTML = total
-        ? seg(good, 'bg-emerald-600') + seg(damage, 'bg-amber-500') + seg(lost, 'bg-red-600') : '';
+        ? seg(good, 'bg-emerald-600') + seg(damage, 'bg-amber-500') + seg(lost, 'bg-red-600') + seg(found, 'bg-violet-400') : '';
 
       // ตัวเลขแต่ละสถานะ: กดแล้วกรองรายการ (กดซ้ำ = ยกเลิก)
       const chip = (key, label, n, dot) => {
@@ -2418,7 +2427,9 @@
       };
       document.getElementById('statusLegend').innerHTML =
         chip('ดี', 'ดี', good, 'bg-emerald-600') + chip('ชำรุด', 'ชำรุด', damage, 'bg-amber-500') +
-        chip('สูญหาย', 'สูญหาย', lost, 'bg-red-600') + chip('ยังไม่ตรวจ', 'ยังไม่ตรวจ', todo, 'bg-slate-300');
+        chip('สูญหาย', 'สูญหาย', lost, 'bg-red-600') +
+        (found ? chip('นอกสุ่ม', 'เพิ่มใหม่ ไม่ระบุสภาพ', found, 'bg-violet-400') : '') +
+        chip('ยังไม่ตรวจ', 'ยังไม่ตรวจ', todo, 'bg-slate-300');
 
       // สถานะป้าย + สุ่ม/เพิ่มใหม่/มีรูป
       const tagBroken = count(a => a.tag === 'ป้ายชำรุด');
@@ -2466,15 +2477,16 @@
         const W = (f, v) => fs.where(f, '==', v);
         const cnt = async (...conds) => (await fs.getCountFromServer(fs.query(col, ...conds))).data().count;
         const rows = await Promise.all(companyNames.map(async (c) => {
-          const [total, good, damage, lost, tagBroken, tagMissing] = await Promise.all([
+          const [total, good, damage, lost, tagBroken, tagMissing, foundNoCond] = await Promise.all([
             cnt(W('company', c)),
             cnt(W('company', c), W('status', 'ดี')),
             cnt(W('company', c), W('status', 'ชำรุด')),
             cnt(W('company', c), W('status', 'สูญหาย')),
             cnt(W('company', c), W('tag', 'ป้ายชำรุด')),
             cnt(W('company', c), W('tag', 'ไม่มีป้าย')),
+            cnt(W('company', c), W('auditType', 'นอกสุ่ม'), W('status', '')),
           ]);
-          return { company: c, total, good, damage, lost, todo: Math.max(0, total - good - damage - lost), tagBroken, tagMissing };
+          return { company: c, total, good, damage, lost, todo: Math.max(0, total - good - damage - lost - foundNoCond), tagBroken, tagMissing };
         }));
         const exSnap = await fs.getDocs(fs.query(col, fs.where('status', 'in', ['ชำรุด', 'สูญหาย']), fs.limit(300)));
         // วันนี้: ดึงเฉพาะรายการที่ตรวจวันนี้ (นับตามคนตรวจ) · 7 วันล่าสุด: นับจากเซิร์ฟเวอร์ทีละวัน (ใช้คำนวณวันที่คาดว่าจะเสร็จ)
@@ -2657,7 +2669,7 @@
         const loc = a.location || '-';
         const s = perLoc[loc] || (perLoc[loc] = { loc, total: 0, done: 0 });
         s.total++;
-        if (a.status) s.done++;
+        if (isChecked(a)) s.done++;
       });
       const groups = {};
       Object.values(perLoc).forEach(s => {
@@ -2753,7 +2765,7 @@
     function updateTabCounts() {
       const companyAssets = assets.filter(a => a.company === currentCompany);
       document.getElementById('tab-all').innerText = `ทั้งหมด (${companyAssets.length})`;
-      document.getElementById('tab-ยังไม่ตรวจ').innerText = `ยังไม่ตรวจ (${companyAssets.filter(a => !a.status).length})`;
+      document.getElementById('tab-ยังไม่ตรวจ').innerText = `ยังไม่ตรวจ (${companyAssets.filter(a => !isChecked(a)).length})`;
       document.getElementById('tab-ดี').innerText = `สภาพดี (${companyAssets.filter(a => a.status === 'ดี').length})`;
       document.getElementById('tab-ชำรุด').innerText = `ชำรุด (${companyAssets.filter(a => a.status === 'ชำรุด').length})`;
       document.getElementById('tab-สูญหาย').innerText = `สูญหาย (${companyAssets.filter(a => a.status === 'สูญหาย').length})`;
@@ -2781,7 +2793,7 @@
         const matchLocation = selectedLocations.length === 0 || selectedLocations.includes(itemLoc);
 
         let matchStatus = true;
-        if (currentFilter === 'ยังไม่ตรวจ') matchStatus = !item.status;
+        if (currentFilter === 'ยังไม่ตรวจ') matchStatus = !isChecked(item);
         else if (currentFilter === 'ดี') matchStatus = item.status === 'ดี';
         else if (currentFilter === 'ชำรุด') matchStatus = item.status === 'ชำรุด';
         else if (currentFilter === 'สูญหาย') matchStatus = item.status === 'สูญหาย';
@@ -2861,9 +2873,10 @@
               </div>
               <h3 class="font-bold text-slate-800 text-sm sm:text-xs mt-1.5 leading-snug">${esc(item.name)}</h3>
               <p class="text-sm sm:text-[11px] font-mono font-bold text-blue-600 mt-0.5"><i class="fa-solid fa-barcode mr-1"></i>${esc(item.code)}</p>
-              ${item.status && item.checkedBy ? `<p class="text-[11px] text-slate-400 mt-0.5"><i class="fa-solid fa-user-check mr-1"></i>${esc(item.checkedBy)}${item.checkedAt ? ` · ${fmtCheckedAt(item.checkedAt)}` : ''}</p>` : ''}
+              ${isChecked(item) && item.checkedBy ? `<p class="text-[11px] text-slate-400 mt-0.5"><i class="fa-solid fa-user-check mr-1"></i>${esc(item.checkedBy)}${item.checkedAt ? ` · ${fmtCheckedAt(item.checkedAt)}` : ''}</p>` : ''}
             </div>
-            ${item.status ? `<span class="shrink-0 text-xs sm:text-[10px] font-bold px-2 py-0.5 rounded ${badgeStyle}">${esc(item.status)}</span>` : ''}
+            ${item.status ? `<span class="shrink-0 text-xs sm:text-[10px] font-bold px-2 py-0.5 rounded ${badgeStyle}">${esc(item.status)}</span>`
+              : isFoundNoCondition(item) ? `<span class="shrink-0 text-xs sm:text-[10px] font-bold px-2 py-0.5 rounded bg-violet-100 text-violet-800">พบแล้ว</span>` : ''}
           </div>
 
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
@@ -2944,7 +2957,7 @@
         "ประเภทสินทรัพย์": a.category, "เลขทะเบียนทรัพย์สิน": a.code, "ชื่อทรัพย์สิน": a.name,
         "สถานที่ตั้ง": a.location || '-', "ผู้รับผิดชอบ": a.owner, "สถานะป้าย": a.tag,
         "สภาพดี/ปกติ": a.status === 'ดี' ? '✓' : '', "สภาพชำรุด": a.status === 'ชำรุด' ? '✓' : '',
-        "สภาพสูญหาย": a.status === 'สูญหาย' ? '✓' : '', "จำนวนรูปถ่าย": imgCountOf(a) > 0 ? `${imgCountOf(a)} รูป` : 'ไม่มีรูปถ่าย', "ตรวจโดย": a.status ? (a.checkedBy || '') : '', "วันเวลาที่ตรวจ": a.status ? fmtCheckedAt(a.checkedAt) : '', "หมายเหตุ": a.remark || ''
+        "สภาพสูญหาย": a.status === 'สูญหาย' ? '✓' : '', "จำนวนรูปถ่าย": imgCountOf(a) > 0 ? `${imgCountOf(a)} รูป` : 'ไม่มีรูปถ่าย', "ตรวจโดย": isChecked(a) ? (a.checkedBy || '') : '', "วันเวลาที่ตรวจ": isChecked(a) ? fmtCheckedAt(a.checkedAt) : '', "หมายเหตุ": a.remark || ''
       }));
       const wb = XLSX.utils.book_new();
       const ws = XLSX.utils.json_to_sheet(excelData);
@@ -2973,7 +2986,7 @@
         "ชื่อทรัพย์สิน": a.name,
         "ประเภทสินทรัพย์": a.category || '',
         "สถานะป้าย": a.tag,
-        "สภาพทรัพย์สิน": a.status || 'ยังไม่ตรวจ',
+        "สภาพทรัพย์สิน": a.status || (isFoundNoCondition(a) ? 'พบแล้ว (ไม่ระบุสภาพ)' : 'ยังไม่ตรวจ'),
         "ลำดับในระบบ": a.id || '',
         "หมายเหตุ": a.remark || '',
         "ติดป้ายแล้ว ✓": ''
