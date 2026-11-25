@@ -2210,11 +2210,6 @@
 
     function execPct(n, d) { return d > 0 ? Math.round(n / d * 100) : 0; }
 
-    function execStackBar(r, h = 'h-3') {
-      const seg = (n, cls) => n > 0 && r.total > 0 ? `<div class="${cls} h-full" style="width:${(n / r.total * 100).toFixed(2)}%"></div>` : '';
-      return `<div class="flex ${h} bg-slate-200 rounded-full overflow-hidden">${seg(r.good, 'bg-emerald-600')}${seg(r.damage, 'bg-amber-500')}${seg(r.lost, 'bg-red-600')}</div>`;
-    }
-
     function execOpenCompany(company) {
       closeExecDashboard();
       if (company !== currentCompany) switchCompany(company);
@@ -2223,30 +2218,34 @@
 
     function renderExecDashboard({ at, rows, exceptions }) {
       const sum = (k) => rows.reduce((s, r) => s + r[k], 0);
-      const T = { total: sum('total'), good: sum('good'), damage: sum('damage'), lost: sum('lost'), todo: sum('todo'), tagBroken: sum('tagBroken'), tagMissing: sum('tagMissing') };
+      const T = { total: sum('total'), damage: sum('damage'), lost: sum('lost'), todo: sum('todo'), tagBroken: sum('tagBroken'), tagMissing: sum('tagMissing') };
       const done = T.total - T.todo;
+      const bad = T.damage + T.lost;
+      const tags = T.tagBroken + T.tagMissing;
       document.getElementById('execStamp').innerText = `ข้อมูล ณ ${new Date(at).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' })}`;
 
-      const kpi = (label, value, sub, color, extra = '') => `
-        <div class="bg-white rounded-xl border border-slate-200 p-3 sm:p-4 ${extra}">
+      const card = (label, value, sub, color) => `
+        <div class="bg-white rounded-xl border border-slate-200 p-3 sm:p-4">
           <div class="text-[11px] sm:text-xs text-slate-500">${label}</div>
-          <div class="text-2xl sm:text-3xl font-bold ${color} mt-0.5">${value}</div>
-          <div class="text-[11px] text-slate-400 mt-0.5">${sub}</div>
+          <div class="text-2xl sm:text-4xl font-bold ${color} mt-0.5">${value}</div>
+          <div class="text-[11px] sm:text-xs text-slate-400 mt-0.5">${sub}</div>
         </div>`;
 
-      // บริษัทที่ตรวจคืบหน้าน้อยสุดขึ้นก่อน (ผู้บริหารดูว่าต้องเร่งที่ไหน)
+      // บริษัทที่ตรวจคืบหน้าน้อยสุดขึ้นก่อน
       const sorted = [...rows].sort((a, b) => execPct(a.total - a.todo, a.total) - execPct(b.total - b.todo, b.total) || b.total - a.total);
       const companyRows = sorted.map(r => {
         const p = execPct(r.total - r.todo, r.total);
-        const n = (v, cls = '') => `<td class="px-2 py-2 text-right font-mono ${v ? cls : 'text-slate-300'}">${v.toLocaleString()}</td>`;
+        const notes = [];
+        if (r.todo) notes.push(`<span class="text-slate-500">ค้าง ${r.todo.toLocaleString()}</span>`);
+        if (r.damage) notes.push(`<span class="text-amber-600 font-bold">⚠ ชำรุด ${r.damage}</span>`);
+        if (r.lost) notes.push(`<span class="text-red-600 font-bold">⚠ หาย ${r.lost}</span>`);
         return `
-          <tr class="border-t border-slate-100 hover:bg-blue-50/50 cursor-pointer" onclick="execOpenCompany(${js(r.company)})" title="เปิดรายการของบริษัทนี้">
-            <td class="px-2 py-2 font-bold text-slate-800 whitespace-nowrap">${esc(r.company)}</td>
-            <td class="px-2 py-2 min-w-[140px]">
-              <div class="flex items-center gap-2"><div class="flex-1">${execStackBar(r, 'h-2.5')}</div><span class="text-xs font-bold w-10 text-right ${p === 100 ? 'text-emerald-600' : 'text-slate-700'}">${p}%</span></div>
-            </td>
-            ${n(r.total, 'text-slate-800')}${n(r.good, 'text-emerald-700')}${n(r.damage, 'text-amber-600 font-bold')}${n(r.lost, 'text-red-600 font-bold')}${n(r.todo, 'text-slate-600')}${n(r.tagBroken + r.tagMissing, 'text-orange-600')}
-          </tr>`;
+          <button onclick="execOpenCompany(${js(r.company)})" class="w-full text-left grid grid-cols-[minmax(0,7rem)_1fr_auto] sm:grid-cols-[10rem_1fr_3rem_14rem] items-center gap-x-3 gap-y-0.5 px-2 py-2 rounded-lg hover:bg-slate-50" title="เปิดรายการของบริษัทนี้">
+            <span class="font-bold text-slate-800 text-sm truncate">${esc(r.company)}</span>
+            <div class="h-2.5 bg-slate-200 rounded-full overflow-hidden"><div class="h-full ${p === 100 ? 'bg-emerald-500' : 'bg-blue-500'}" style="width:${p}%"></div></div>
+            <span class="text-sm font-bold text-right ${p === 100 ? 'text-emerald-600' : 'text-slate-700'}">${p}%</span>
+            <span class="col-span-3 sm:col-span-1 text-xs flex gap-2 sm:justify-end flex-wrap">${notes.join('')}</span>
+          </button>`;
       }).join('');
 
       const exRows = [...exceptions].sort((a, b) =>
@@ -2261,76 +2260,44 @@
             <td class="px-2 py-1.5 text-slate-500 min-w-[110px]">${esc(x.remark || '')}</td>
           </tr>`).join('');
 
-      // ความคืบหน้าแยกชั้น ของบริษัทที่เปิดอยู่ (ใช้ข้อมูลที่โหลดไว้แล้ว ไม่อ่านเพิ่ม)
-      const groups = assetsLoading ? [] : groupLocations(assets.filter(a => a.company === currentCompany));
-      const floorRows = groups.map(g => {
-        const p = execPct(g.done, g.total);
-        return `
-          <div class="flex items-center gap-2 text-xs">
-            <span class="w-28 sm:w-40 truncate ${g.isFloor ? 'font-bold text-slate-800' : 'text-slate-600'}" title="${esc(g.key)}">${esc(g.key)}</span>
-            <div class="flex-1 h-2.5 bg-slate-200 rounded-full overflow-hidden"><div class="h-full ${p === 100 ? 'bg-emerald-500' : 'bg-blue-500'}" style="width:${p}%"></div></div>
-            <span class="w-20 text-right font-mono text-slate-500">${g.done}/${g.total}</span>
-          </div>`;
-      }).join('');
-
-      const legend = (cls, label, v) => `<span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full ${cls}"></span>${label} <b class="text-slate-800">${v.toLocaleString()}</b></span>`;
-
       document.getElementById('execBody').innerHTML = `
-        <div class="grid grid-cols-2 lg:grid-cols-5 gap-2 sm:gap-3">
-          ${kpi('ทรัพย์สินทั้งหมด', T.total.toLocaleString(), `${rows.length} บริษัท`, 'text-slate-800', 'col-span-2 lg:col-span-1')}
-          ${kpi('ตรวจนับแล้ว', execPct(done, T.total) + '%', `${done.toLocaleString()} รายการ`, 'text-blue-700')}
-          ${kpi('ยังไม่ตรวจ', T.todo.toLocaleString(), 'รายการ', 'text-slate-600')}
-          ${kpi('ชำรุด / สูญหาย', (T.damage + T.lost).toLocaleString(), `ชำรุด ${T.damage} · สูญหาย ${T.lost}`, T.damage + T.lost ? 'text-red-600' : 'text-slate-800')}
-          ${kpi('ป้ายต้องทำใหม่', (T.tagBroken + T.tagMissing).toLocaleString(), `ชำรุด ${T.tagBroken} · ไม่มีป้าย ${T.tagMissing}`, 'text-orange-600')}
+        <div class="grid grid-cols-3 gap-2 sm:gap-3">
+          ${card('ตรวจนับแล้ว', execPct(done, T.total) + '%', `${done.toLocaleString()} / ${T.total.toLocaleString()}`, 'text-blue-700')}
+          ${card('ชำรุด / สูญหาย', bad.toLocaleString(), `ชำรุด ${T.damage} · หาย ${T.lost}`, bad ? 'text-red-600' : 'text-emerald-600')}
+          ${card('ป้ายต้องทำใหม่', tags.toLocaleString(), `ชำรุด ${T.tagBroken} · ไม่มี ${T.tagMissing}`, tags ? 'text-orange-600' : 'text-emerald-600')}
         </div>
 
-        <section class="bg-white rounded-xl border border-slate-200 p-3 sm:p-4 space-y-2">
-          <h3 class="font-bold text-slate-800 text-sm">ภาพรวมผลการตรวจนับ</h3>
-          ${execStackBar({ ...T }, 'h-4')}
-          <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600">
-            ${legend('bg-emerald-600', 'สภาพดี', T.good)}${legend('bg-amber-500', 'ชำรุด', T.damage)}${legend('bg-red-600', 'สูญหาย', T.lost)}${legend('bg-slate-300', 'ยังไม่ตรวจ', T.todo)}
-          </div>
+        <section class="bg-white rounded-xl border border-slate-200 p-2 sm:p-3">
+          <h3 class="font-bold text-slate-800 text-sm px-2 pt-1 pb-1">ความคืบหน้าแต่ละบริษัท</h3>
+          ${companyRows}
         </section>
 
-        <section class="bg-white rounded-xl border border-slate-200 p-3 sm:p-4">
-          <div class="flex justify-between items-baseline mb-2">
-            <h3 class="font-bold text-slate-800 text-sm">แยกตามบริษัท</h3>
-            <span class="text-[11px] text-slate-400 no-print">กดที่บริษัทเพื่อเปิดรายการ</span>
-          </div>
-          <div class="overflow-x-auto -mx-1">
-            <table class="w-full text-sm">
-              <thead><tr class="text-[11px] text-slate-500 text-right">
-                <th class="px-2 py-1 text-left font-medium">บริษัท</th><th class="px-2 py-1 text-left font-medium">ความคืบหน้า</th>
-                <th class="px-2 py-1 font-medium">ทั้งหมด</th><th class="px-2 py-1 font-medium">ดี</th><th class="px-2 py-1 font-medium">ชำรุด</th>
-                <th class="px-2 py-1 font-medium">สูญหาย</th><th class="px-2 py-1 font-medium">ยังไม่ตรวจ</th><th class="px-2 py-1 font-medium">ป้ายต้องทำใหม่</th>
-              </tr></thead>
-              <tbody>${companyRows}</tbody>
-              <tfoot><tr class="border-t-2 border-slate-300 font-bold text-right text-slate-800">
-                <td class="px-2 py-2 text-left">รวม</td><td class="px-2 py-2 text-left text-xs">${execPct(done, T.total)}%</td>
-                <td class="px-2 py-2 font-mono">${T.total.toLocaleString()}</td><td class="px-2 py-2 font-mono">${T.good.toLocaleString()}</td>
-                <td class="px-2 py-2 font-mono">${T.damage}</td><td class="px-2 py-2 font-mono">${T.lost}</td>
-                <td class="px-2 py-2 font-mono">${T.todo.toLocaleString()}</td><td class="px-2 py-2 font-mono">${(T.tagBroken + T.tagMissing).toLocaleString()}</td>
-              </tr></tfoot>
-            </table>
-          </div>
-        </section>
-
-        <section class="bg-white rounded-xl border border-slate-200 p-3 sm:p-4">
-          <h3 class="font-bold text-slate-800 text-sm mb-2">รายการชำรุด / สูญหาย <span class="font-normal text-slate-400">(${exceptions.length} รายการ)</span></h3>
+        <details id="execExceptions" class="bg-white rounded-xl border border-slate-200 p-3 sm:p-4 group">
+          <summary class="flex justify-between items-center cursor-pointer list-none">
+            <span class="font-bold text-slate-800 text-sm">รายการชำรุด / สูญหาย <span class="font-normal text-slate-400">(${exceptions.length})</span></span>
+            <span class="text-xs text-blue-600 no-print">${exceptions.length ? 'ดูรายละเอียด <i class="fa-solid fa-chevron-down text-[10px] group-open:rotate-180 transition-transform"></i>' : ''}</span>
+          </summary>
+          <div class="mt-2">
           ${exceptions.length ? `<div class="overflow-x-auto -mx-1"><table class="w-full text-xs">
             <thead><tr class="text-[11px] text-slate-500 text-left">
               <th class="px-2 py-1 font-medium">สถานะ</th><th class="px-2 py-1 font-medium">บริษัท</th><th class="px-2 py-1 font-medium">เลขทะเบียน</th>
               <th class="px-2 py-1 font-medium">ชื่อทรัพย์สิน</th><th class="px-2 py-1 font-medium">สถานที่</th><th class="px-2 py-1 font-medium">หมายเหตุ</th>
             </tr></thead><tbody>${exRows}</tbody></table></div>`
-            : `<div class="text-center text-emerald-600 text-sm py-4">✓ ไม่มีรายการชำรุดหรือสูญหาย</div>`}
-        </section>
-
-        <section class="bg-white rounded-xl border border-slate-200 p-3 sm:p-4 space-y-1.5">
-          <h3 class="font-bold text-slate-800 text-sm mb-1">ความคืบหน้าแยกชั้น — ${esc(currentCompany)}</h3>
-          ${floorRows || '<div class="text-slate-400 text-xs">ยังไม่มีข้อมูล</div>'}
-          <div class="text-[11px] text-slate-400 pt-1 no-print">ดูบริษัทอื่น: กดชื่อบริษัทในตารางด้านบน แล้วเปิด Dashboard อีกครั้ง</div>
-        </section>`;
+            : `<div class="text-center text-emerald-600 text-sm py-2">✓ ไม่มีรายการชำรุดหรือสูญหาย</div>`}
+          </div>
+        </details>`;
     }
+
+    // ตอนพิมพ์ / บันทึก PDF ให้กางรายการชำรุด/สูญหายออกเสมอ แล้วคืนค่าเดิมหลังพิมพ์
+    let execDetailsWasOpen = false;
+    window.addEventListener('beforeprint', () => {
+      const d = document.getElementById('execExceptions');
+      if (d) { execDetailsWasOpen = d.open; d.open = true; }
+    });
+    window.addEventListener('afterprint', () => {
+      const d = document.getElementById('execExceptions');
+      if (d) d.open = execDetailsWasOpen;
+    });
 
     // --- ความคืบหน้าแยกตามสถานที่: ที่ยังตรวจไม่ครบขึ้นก่อน กดชื่อสถานที่เพื่อกรองรายการ ---
     let locProgressOpen = false;
