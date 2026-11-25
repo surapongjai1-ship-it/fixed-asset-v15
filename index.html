@@ -36,6 +36,10 @@
       * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     }
     @page { size: A4; margin: 14mm 12mm; }
+    @page landscape { size: A4 landscape; margin: 10mm 10mm; }
+    #signReport.landscape .sheet { page: landscape; max-width: 297mm !important; font-size: 11px; }
+    #signReport table.rpt tr.bad td { background: #fef2f2; }
+    #signReport table.rpt thead { display: table-header-group; }
     #signReport .sheet { font-size: 13px; color: #0f172a; }
     #signReport table.rpt { width: 100%; border-collapse: collapse; }
     #signReport table.rpt th, #signReport table.rpt td { border: 1px solid #cbd5e1; padding: 4px 6px; vertical-align: top; }
@@ -66,7 +70,7 @@
       </div>
       <div class="flex items-center gap-2 shrink-0">
         <!-- จอใหญ่: เหลือปุ่ม Excel ไว้ข้างนอก ที่เหลืออยู่ในเมนู -->
-        <button onclick="exportToExcelClean()" title="ส่งออก Excel" class="hidden sm:flex bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium px-3 py-2 rounded-lg items-center gap-1.5 transition-all shadow-sm">
+        <button onclick="chooseExportFormat('report')" title="ส่งออก Excel / PDF" class="hidden sm:flex bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium px-3 py-2 rounded-lg items-center gap-1.5 transition-all shadow-sm">
           <i class="fa-solid fa-file-excel"></i> Excel
         </button>
         <!-- เมนู ☰ (ทุกขนาดจอ) -->
@@ -96,10 +100,10 @@
       <button onclick="closeMobileMenu(); openSignReport()" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
         <i class="fa-solid fa-file-signature w-5 text-center text-rose-300"></i> พิมพ์รายงานเซ็นรับรอง
       </button>
-      <button onclick="closeMobileMenu(); exportToExcelClean()" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
-        <i class="fa-solid fa-file-excel w-5 text-center text-emerald-400"></i> ส่งออก Excel
+      <button onclick="closeMobileMenu(); chooseExportFormat('report')" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
+        <i class="fa-solid fa-file-export w-5 text-center text-emerald-400"></i> ส่งออกรายงานตรวจนับ (Excel / PDF)
       </button>
-      <button onclick="closeMobileMenu(); exportTagReprintList()" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
+      <button onclick="closeMobileMenu(); chooseExportFormat('tags')" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
         <i class="fa-solid fa-tags w-5 text-center text-orange-400"></i> ส่งออกรายการป้ายต้องทำใหม่
       </button>
       <button onclick="closeMobileMenu(); downloadAllImagesZip()" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
@@ -2601,7 +2605,7 @@
           link(tagFilter === 'ไม่มีป้าย', `setTagFilter('${tagFilter === 'ไม่มีป้าย' ? '' : 'ไม่มีป้าย'}')`, `ไม่มีป้าย <b>${tagMissing}</b>`)
         : '<span class="text-slate-500 px-1.5">ครบทุกรายการ ✓</span>';
       document.getElementById('dashExtras').innerHTML = `
-        <div class="flex items-center flex-wrap gap-0.5"><span class="text-slate-500 w-16 shrink-0">🏷️ ป้าย</span>${tagLine}${(tagBroken || tagMissing) ? `<button onclick="exportTagReprintList()" title="ส่งออกรายการป้ายต้องทำใหม่เป็น Excel" class="ml-auto text-emerald-700 hover:bg-emerald-50 px-1.5 py-0.5 rounded"><i class="fa-solid fa-file-excel"></i> Excel</button>` : ''}</div>
+        <div class="flex items-center flex-wrap gap-0.5"><span class="text-slate-500 w-16 shrink-0">🏷️ ป้าย</span>${tagLine}${(tagBroken || tagMissing) ? `<button onclick="chooseExportFormat('tags')" title="ส่งออกรายการป้ายต้องทำใหม่ (Excel / PDF)" class="ml-auto text-emerald-700 hover:bg-emerald-50 px-1.5 py-0.5 rounded"><i class="fa-solid fa-file-excel"></i> Excel</button>` : ''}</div>
         <div class="flex items-center flex-wrap gap-0.5"><span class="text-slate-500 w-16 shrink-0">📋 อื่นๆ</span>${
           link(currentFilter === 'สุ่ม', `filterStatus('${currentFilter === 'สุ่ม' ? 'all' : 'สุ่ม'}'); goToList()`, `🎯 สุ่ม <b>${sampled}</b>`)}<span class="text-slate-300">·</span>${
           link(currentFilter === 'นอกสุ่ม', `filterStatus('${currentFilter === 'นอกสุ่ม' ? 'all' : 'นอกสุ่ม'}'); goToList()`, `➕ เพิ่มใหม่ <b>${extra}</b>`)}<span class="text-slate-300">·</span>${
@@ -3151,6 +3155,82 @@
       XLSX.writeFile(wb, `รายงานตรวจนับ_${String(currentCompany).replace(/[\\/:*?"<>|]/g, '_')}_${today}.xlsx`);
     }
 
+    // ===================== ส่งออก: เลือก Excel หรือ PDF =====================
+    function chooseExportFormat(kind) {
+      if (assetsLoading) return alert("กำลังโหลดรายการ รอสักครู่แล้วลองใหม่ครับ");
+      const isTags = kind === 'tags';
+      document.getElementById('exportChooserTitle').innerText = isTags ? 'ส่งออกรายการป้ายต้องทำใหม่' : 'ส่งออกรายงานตรวจนับ';
+      document.getElementById('exportChooserSub').innerText = currentCompany;
+      const close = () => document.getElementById('exportChooser').classList.add('hidden');
+      document.getElementById('exportChooseExcel').onclick = () => { close(); isTags ? exportTagReprintList() : exportToExcelClean(); };
+      document.getElementById('exportChoosePdf').onclick = () => { close(); isTags ? openTagReprintPdf() : openAuditReportPdf(); };
+      document.getElementById('exportChooser').classList.remove('hidden');
+    }
+
+    // ใช้หน้าพิมพ์เดียวกับรายงานเซ็นรับรอง: ตั้งชื่อแถบบน + แนวกระดาษ
+    function setPrintDoc(label, landscape) {
+      document.getElementById('printDocLabel').innerText = label;
+      document.getElementById('signReport').classList.toggle('landscape', !!landscape);
+    }
+    function showPrintDoc(label, landscape, bodyHtml, warnHtml) {
+      document.getElementById('signReportBody').innerHTML = bodyHtml;
+      const warn = document.getElementById('signReportWarn');
+      warn.innerHTML = warnHtml || '';
+      warn.classList.toggle('hidden', !warnHtml);
+      setPrintDoc(label, landscape);
+      document.getElementById('signReport').classList.remove('hidden');
+      document.body.style.overflow = 'hidden';
+    }
+    const pdfHint = '💡 กด <b>พิมพ์ / PDF</b> แล้วเลือก <b>"บันทึกเป็น PDF"</b> (มือถือ: กดพิมพ์ → แชร์ หรือบันทึกลงไฟล์) จะได้ไฟล์ PDF ไว้แนบส่ง';
+
+    // PDF: รายงานตรวจนับ (ทุกรายการของ Tab ที่เปิดอยู่) — A4 แนวนอน
+    function openAuditReportPdf() {
+      const list = assets.filter(a => a.company === currentCompany).slice().sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
+      const sampled = list.filter(a => a.auditType !== 'นอกสุ่ม');
+      const cnt = (fn) => sampled.filter(fn).length;
+      const done = cnt(a => a.status), good = cnt(a => a.status === 'ดี'), dmg = cnt(a => a.status === 'ชำรุด'), lost = cnt(a => a.status === 'สูญหาย');
+      const pct = sampled.length ? Math.round(done / sampled.length * 100) : 0;
+      const statusText = (a) => a.status || (isFoundNoCondition(a) ? 'พบแล้ว' : 'ยังไม่ตรวจ');
+      const when = (v) => { const d = v && typeof v.toDate === 'function' ? v.toDate() : null; return d ? d.toLocaleString('th-TH', { day: 'numeric', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''; };
+      const body = list.map((a, i) => `
+        <tr class="${a.status === 'ชำรุด' || a.status === 'สูญหาย' ? 'bad' : ''}">
+          <td class="num">${esc(a.id || i + 1)}</td><td>${esc(a.code)}</td><td>${esc(a.name)}</td><td>${esc(a.location || '-')}</td>
+          <td>${a.auditType === 'นอกสุ่ม' ? 'เพิ่มใหม่' : 'สุ่ม'}</td><td>${esc(statusText(a))}</td><td>${esc(a.tag || '')}</td>
+          <td>${isChecked(a) ? esc(a.checkedBy || '') : ''}</td><td style="white-space:nowrap">${isChecked(a) ? esc(when(a.checkedAt)) : ''}</td><td>${esc(a.remark || '')}</td>
+        </tr>`).join('');
+      showPrintDoc('📄 รายงานตรวจนับ (PDF)', true, `
+        <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap">
+          <div><div style="font-size:16px;font-weight:700">รายงานการตรวจนับทรัพย์สินถาวร — ${esc(currentCompany)}</div>
+            <div style="color:#475569">พิมพ์เมื่อ ${esc(new Date().toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' }))} · ทั้งหมด ${list.length.toLocaleString()} รายการ (ตามทะเบียน ${sampled.length.toLocaleString()} · เพิ่มใหม่ ${(list.length - sampled.length).toLocaleString()})</div></div>
+          <div style="font-weight:600">ตรวจแล้ว ${done.toLocaleString()}/${sampled.length.toLocaleString()} (${pct}%) · ดี ${good} · ชำรุด ${dmg} · สูญหาย ${lost} · ยังไม่ตรวจ ${sampled.length - done}</div>
+        </div>
+        <table class="rpt" style="margin-top:8px"><thead><tr>
+          <th class="num">ลำดับ</th><th>เลขทะเบียน</th><th>ชื่อทรัพย์สิน</th><th>สถานที่</th><th>ประเภท</th><th>สถานะ</th><th>ป้าย</th><th>ตรวจโดย</th><th>วันเวลา</th><th>หมายเหตุ</th>
+        </tr></thead><tbody>${body}</tbody></table>`, pdfHint);
+    }
+
+    // PDF: รายการป้ายต้องทำใหม่ — จัดกลุ่มตามชั้น มีช่องติ๊ก "ติดแล้ว"
+    function openTagReprintPdf() {
+      const list = assets.filter(a => a.company === currentCompany && (a.tag === 'ป้ายชำรุด' || a.tag === 'ไม่มีป้าย'));
+      if (!list.length) return alert(`"${currentCompany}" ไม่มีรายการที่ต้องทำป้ายใหม่ครับ`);
+      const floorOf = (a) => floorKeyOf(a.location) || 'อื่นๆ';
+      const nat = (x, y) => String(x).localeCompare(String(y), 'th', { numeric: true });
+      list.sort((a, b) => ((floorOf(a) === 'อื่นๆ') - (floorOf(b) === 'อื่นๆ')) || nat(floorOf(a), floorOf(b)) || nat(a.location || '-', b.location || '-') || (Number(a.id) || 0) - (Number(b.id) || 0));
+      const floors = [...new Set(list.map(floorOf))];
+      let i = 0;
+      const groups = floors.map(f => {
+        const rows = list.filter(a => floorOf(a) === f);
+        return `<tr><td colspan="6" style="background:#f8fafc;font-weight:700">${esc(f)} · ${rows.length} รายการ</td></tr>` +
+          rows.map(a => `<tr><td class="num">${++i}</td><td>${esc(a.location || '-')}</td><td>${esc(a.code)}</td><td>${esc(a.name)}</td><td>${esc(a.tag)}</td><td style="text-align:center">☐</td></tr>`).join('');
+      }).join('');
+      const broken = list.filter(a => a.tag === 'ป้ายชำรุด').length;
+      showPrintDoc('🏷️ ป้ายต้องทำใหม่ (PDF)', false, `
+        <div style="font-size:16px;font-weight:700">รายการป้ายต้องทำใหม่ — ${esc(currentCompany)}</div>
+        <div style="color:#475569;margin-bottom:8px">พิมพ์เมื่อ ${esc(new Date().toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' }))} · รวม ${list.length} รายการ (ป้ายชำรุด ${broken} · ไม่มีป้าย ${list.length - broken}) · ${floors.length} ชั้น/จุด</div>
+        <table class="rpt"><thead><tr><th class="num">ที่</th><th>สถานที่</th><th>เลขทะเบียน</th><th>ชื่อทรัพย์สิน</th><th>สถานะป้าย</th><th>ติดแล้ว</th></tr></thead>
+        <tbody>${groups}</tbody></table>`, pdfHint);
+    }
+
     // ===================== รายงานผลการตรวจนับ (เซ็นรับรอง) =====================
     // ใช้ข้อมูลของบริษัทที่เปิดอยู่ (โหลดไว้แล้ว ไม่อ่านฐานข้อมูลเพิ่ม)
     // ===== ขั้นที่ 1: เลือก Tab ที่จะรวมในรายงาน =====
@@ -3348,6 +3428,7 @@
       const warn = document.getElementById('signReportWarn');
       warn.innerHTML = S.todo ? `⚠️ ยังมีรายการที่ <b>ยังไม่ได้ตรวจ ${S.todo.toLocaleString()} รายการ</b> — ในรายงานจะระบุตัวเลขนี้ไว้ ควรตรวจให้ครบก่อนพิมพ์ฉบับจริง` : '';
       warn.classList.toggle('hidden', !S.todo);
+      setPrintDoc('📝 รายงานเซ็นรับรอง', false);
       document.getElementById('signReport').classList.remove('hidden');
       document.body.style.overflow = 'hidden';
     }
@@ -3481,10 +3562,27 @@
       </div>
     </div>
   </div>
+  <!-- เลือกรูปแบบไฟล์ส่งออก -->
+  <div id="exportChooser" class="hidden fixed inset-0 z-[91] bg-black/50 flex items-end sm:items-center justify-center sm:p-4" onclick="if(event.target===this)this.classList.add('hidden')">
+    <div class="bg-white w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-2xl p-4 space-y-3">
+      <div class="flex items-start justify-between gap-2">
+        <div><h3 id="exportChooserTitle" class="font-bold text-slate-900">ส่งออก</h3><div class="text-[11px] text-slate-500" id="exportChooserSub"></div></div>
+        <button onclick="document.getElementById('exportChooser').classList.add('hidden')" aria-label="ปิด" class="text-slate-400 hover:text-slate-700 text-lg px-2"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <button id="exportChoosePdf" class="w-full flex items-center gap-3 text-left border border-slate-200 hover:border-rose-300 hover:bg-rose-50 rounded-xl p-3">
+        <i class="fa-solid fa-file-pdf text-2xl text-rose-600 w-8 text-center"></i>
+        <span><b class="text-slate-900">PDF</b><span class="block text-xs text-slate-500">แนบส่งได้เลย เปิดดูได้ทุกเครื่อง แก้ไขไม่ได้</span></span>
+      </button>
+      <button id="exportChooseExcel" class="w-full flex items-center gap-3 text-left border border-slate-200 hover:border-emerald-300 hover:bg-emerald-50 rounded-xl p-3">
+        <i class="fa-solid fa-file-excel text-2xl text-emerald-600 w-8 text-center"></i>
+        <span><b class="text-slate-900">Excel</b><span class="block text-xs text-slate-500">เอาไปกรอง คำนวณ หรือแก้ไขต่อ</span></span>
+      </button>
+    </div>
+  </div>
   <!-- รายงานผลการตรวจนับ สำหรับเซ็นรับรอง -->
   <div id="signReport" class="hidden fixed inset-0 z-[90] bg-slate-200 overflow-y-auto">
     <div class="no-print sticky top-0 z-10 bg-slate-900 text-white px-4 py-2 flex items-center gap-2">
-      <span class="font-bold text-sm flex-1 truncate">📝 รายงานเซ็นรับรอง</span>
+      <span id="printDocLabel" class="font-bold text-sm flex-1 truncate">📝 รายงานเซ็นรับรอง</span>
       <button onclick="printSignReport()" class="bg-blue-600 hover:bg-blue-700 text-sm px-3 py-1.5 rounded-lg"><i class="fa-solid fa-print mr-1"></i> พิมพ์ / PDF</button>
       <button onclick="closeSignReport()" aria-label="ปิด" class="bg-slate-700 hover:bg-slate-600 text-sm px-3 py-1.5 rounded-lg"><i class="fa-solid fa-xmark"></i></button>
     </div>
