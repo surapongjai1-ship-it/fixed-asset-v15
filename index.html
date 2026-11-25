@@ -69,6 +69,9 @@
       <button onclick="closeMobileMenu(); openExecDashboard()" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left font-bold">
         <i class="fa-solid fa-chart-line w-5 text-center text-blue-400"></i> Dashboard ผู้บริหาร
       </button>
+      <button onclick="closeMobileMenu(); askInspectorName()" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
+        <i class="fa-solid fa-user-check w-5 text-center text-emerald-400"></i> ผู้ตรวจเครื่องนี้: <b id="inspectorMenuName" class="truncate">…</b>
+      </button>
       <button onclick="closeMobileMenu(); toggleMetaCard(true)" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
         <i class="fa-solid fa-user-pen w-5 text-center text-slate-300"></i> ผู้ตรวจ และวันที่ตรวจ
       </button>
@@ -553,6 +556,8 @@
 
     window.onload = function() {
       syncLocationFilterLabel();
+      syncInspectorLabel();
+      if (!getInspectorName()) setTimeout(askInspectorName, 600);
 
       const savedMeta = localStorage.getItem('skyai_meta');
       if (savedMeta) {
@@ -661,8 +666,52 @@
     let assetsLoading = true;
     let companyListSeeding = false;
 
+    // --- ชื่อผู้ตรวจของเครื่องนี้ (ถามครั้งแรกครั้งเดียว เก็บใน localStorage) ---
+    const INSPECTOR_KEY = 'skyai_inspector_name';
+    function getInspectorName() {
+      try { return (localStorage.getItem(INSPECTOR_KEY) || '').trim(); } catch (e) { return ''; }
+    }
+    let inspectorResolvers = [];
+    function askInspectorName() {
+      return new Promise(resolve => {
+        inspectorResolvers.push(resolve);
+        const input = document.getElementById('inspectorNameInput');
+        input.value = getInspectorName();
+        document.getElementById('inspectorModal').classList.remove('hidden');
+        setTimeout(() => input.focus(), 50);
+      });
+    }
+    function saveInspectorName() {
+      const name = document.getElementById('inspectorNameInput').value.trim().slice(0, 40);
+      if (!name) { document.getElementById('inspectorNameInput').focus(); return; }
+      try { localStorage.setItem(INSPECTOR_KEY, name); } catch (e) {}
+      document.getElementById('inspectorModal').classList.add('hidden');
+      syncInspectorLabel();
+      inspectorResolvers.splice(0).forEach(r => r(name));
+    }
+    function syncInspectorLabel() {
+      const el = document.getElementById('inspectorMenuName');
+      if (el) el.innerText = getInspectorName() || 'ยังไม่ได้ตั้ง';
+    }
+    // ใช้ก่อนบันทึกสถานะ: มีชื่อแล้วใช้เลย ยังไม่มีให้ถามก่อน
+    async function ensureInspectorName() {
+      return getInspectorName() || await askInspectorName();
+    }
+    // ฟิลด์ที่บันทึกพร้อมสถานะ (ยกเลิกสถานะ = ล้างชื่อ/เวลา)
+    function checkFields(status, name) {
+      const FV = firebase.firestore.FieldValue;
+      return status
+        ? { status, checkedBy: name, checkedAt: FV.serverTimestamp() }
+        : { status: '', checkedBy: FV.delete(), checkedAt: FV.delete() };
+    }
+    function fmtCheckedAt(ts) {
+      const d = ts && typeof ts.toDate === 'function' ? ts.toDate() : (ts ? new Date(ts) : null);
+      if (!d || isNaN(d)) return '';
+      return d.toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+    }
+
     function normalizeAsset(doc) {
-      const data = doc.data();
+      const data = doc.data({ serverTimestamps: 'estimate' });
       let imgs = data.images || [];
       if (data.image && imgs.length === 0) imgs = [data.image];
       return { docId: doc.id, ...data, images: imgs, auditType: data.auditType || 'สุ่ม' };
@@ -1820,12 +1869,14 @@
       }
     }
 
-    function quickSetStatus(status) {
+    async function quickSetStatus(status) {
       if (!scannedTargetDocId) return;
+      const targetId = scannedTargetDocId;
       const tagVal = document.getElementById('popupTagSelect').value;
-      
-      db.collection("skyai_assets_v9_clean").doc(scannedTargetDocId).update({
-        status: status,
+      const name = await ensureInspectorName();
+
+      db.collection("skyai_assets_v9_clean").doc(targetId).update({
+        ...checkFields(status, name),
         tag: tagVal
       }).then(() => {
         closeQuickPopup();
@@ -1998,8 +2049,11 @@
       db.collection("skyai_assets_v9_clean").doc(docId).update({ [field]: value }).catch(err => alert("บันทึกไม่สำเร็จ: " + err.message));
     }
 
-    function setStatus(docId, status, currentStatus) {
-      updateAssetField(docId, 'status', currentStatus === status ? '' : status);
+    async function setStatus(docId, status, currentStatus) {
+      const next = currentStatus === status ? '' : status;
+      const name = next ? await ensureInspectorName() : '';
+      db.collection(ASSETS_COL).doc(docId).update(checkFields(next, name))
+        .catch(err => alert("บันทึกไม่สำเร็จ: " + err.message));
     }
 
     function setTag(docId, val) { updateAssetField(docId, 'tag', val); }
@@ -2215,8 +2269,17 @@
           return { company: c, total, good, damage, lost, todo: Math.max(0, total - good - damage - lost), tagBroken, tagMissing };
         }));
         const exSnap = await fs.getDocs(fs.query(col, fs.where('status', 'in', ['ชำรุด', 'สูญหาย']), fs.limit(300)));
+        // วันนี้: ดึงเฉพาะรายการที่ตรวจวันนี้ (นับตามคนตรวจ) · 7 วันล่าสุด: นับจากเซิร์ฟเวอร์ทีละวัน (ใช้คำนวณวันที่คาดว่าจะเสร็จ)
+        const dayStart = (n) => { const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - n); return d; };
+        const TS = (d) => fs.Timestamp.fromDate(d);
+        const todaySnap = await fs.getDocs(fs.query(col, fs.where('checkedAt', '>=', TS(dayStart(0))), fs.limit(2000)));
+        const byInspector = {};
+        todaySnap.docs.forEach(d => { const n = d.data().checkedBy || 'ไม่ระบุ'; byInspector[n] = (byInspector[n] || 0) + 1; });
+        const perDay = await Promise.all([1, 2, 3, 4, 5, 6].map(n =>
+          cnt(fs.where('checkedAt', '>=', TS(dayStart(n))), fs.where('checkedAt', '<', TS(dayStart(n - 1))))));
+        const today = { count: todaySnap.size, byInspector, perDay: [todaySnap.size, ...perDay] };
         const exceptions = exSnap.docs.map(d => ({ docId: d.id, ...d.data() }));
-        execCache = { at: Date.now(), rows, exceptions };
+        execCache = { at: Date.now(), rows, exceptions, today };
         renderExecDashboard(execCache);
       } catch (err) {
         const quota = err && (err.code === 'resource-exhausted' || /quota/i.test(err.message || ''));
@@ -2233,7 +2296,7 @@
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
-    function renderExecDashboard({ at, rows, exceptions }) {
+    function renderExecDashboard({ at, rows, exceptions, today }) {
       const sum = (k) => rows.reduce((s, r) => s + r[k], 0);
       const T = { total: sum('total'), damage: sum('damage'), lost: sum('lost'), todo: sum('todo'), tagBroken: sum('tagBroken'), tagMissing: sum('tagMissing') };
       const done = T.total - T.todo;
@@ -2301,6 +2364,8 @@
           ${card('ป้ายต้องทำใหม่', tags.toLocaleString(), `ชำรุด ${T.tagBroken} · ไม่มี ${T.tagMissing}`, tags ? 'text-orange-600' : 'text-emerald-600')}
         </div>
 
+        ${execTodayHtml(today, T.todo)}
+
         <section class="bg-white rounded-xl border border-slate-200 p-2 sm:p-3">
           <h3 class="font-bold text-slate-800 text-sm px-2 pt-1 pb-1">ความคืบหน้าแต่ละบริษัท</h3>
           ${companyRows}
@@ -2316,6 +2381,27 @@
             : `<div class="text-center text-emerald-600 text-sm py-2">✓ ไม่มีรายการชำรุดหรือสูญหาย</div>`}
           </div>
         </details>`;
+    }
+
+    // บรรทัด "วันนี้ตรวจไปกี่รายการ" + วันที่คาดว่าจะเสร็จ (จากค่าเฉลี่ยวันที่มีการตรวจใน 7 วันล่าสุด)
+    function execTodayHtml(today, todo) {
+      if (!today) return '';
+      const people = Object.entries(today.byInspector).sort((a, b) => b[1] - a[1])
+        .map(([n, c]) => `${esc(n)} ${c}`).join(' · ');
+      const active = today.perDay.filter(n => n > 0);
+      let eta = '';
+      if (todo === 0) eta = '<span class="text-emerald-600 font-bold">ตรวจครบทุกรายการแล้ว ✓</span>';
+      else if (active.length) {
+        const avg = Math.max(1, Math.round(active.reduce((a, b) => a + b, 0) / active.length));
+        const days = Math.ceil(todo / avg);
+        const d = new Date(); d.setDate(d.getDate() + days);
+        eta = `เฉลี่ย ${avg.toLocaleString()} รายการ/วัน → เหลือ ${todo.toLocaleString()} คาดว่าเสร็จประมาณ <b>${d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short' })}</b> (อีก ~${days} วันทำการตรวจ)`;
+      } else eta = '<span class="text-slate-400">ยังไม่มีข้อมูลเวลาตรวจ · เริ่มนับเมื่อมีการกดสถานะหลังเปิดใช้ฟีเจอร์นี้</span>';
+      return `
+        <section class="bg-white rounded-xl border border-slate-200 p-3 sm:p-4 text-sm space-y-1">
+          <div><span class="text-slate-500">📅 วันนี้ตรวจไป</span> <b class="text-slate-900">${today.count.toLocaleString()}</b> <span class="text-slate-500">รายการ</span>${people ? ` <span class="text-xs text-slate-500">(${people})</span>` : ''}</div>
+          <div class="text-xs text-slate-600">⏱ ${eta}</div>
+        </section>`;
     }
 
     function execJumpToGroup(company) {
@@ -2567,6 +2653,7 @@
               </div>
               <h3 class="font-bold text-slate-800 text-sm sm:text-xs mt-1.5 leading-snug">${esc(item.name)}</h3>
               <p class="text-sm sm:text-[11px] font-mono font-bold text-blue-600 mt-0.5"><i class="fa-solid fa-barcode mr-1"></i>${esc(item.code)}</p>
+              ${item.status && item.checkedBy ? `<p class="text-[11px] text-slate-400 mt-0.5"><i class="fa-solid fa-user-check mr-1"></i>${esc(item.checkedBy)}${item.checkedAt ? ` · ${fmtCheckedAt(item.checkedAt)}` : ''}</p>` : ''}
             </div>
             ${item.status ? `<span class="shrink-0 text-xs sm:text-[10px] font-bold px-2 py-0.5 rounded ${badgeStyle}">${esc(item.status)}</span>` : ''}
           </div>
@@ -2649,7 +2736,7 @@
         "ประเภทสินทรัพย์": a.category, "เลขทะเบียนทรัพย์สิน": a.code, "ชื่อทรัพย์สิน": a.name,
         "สถานที่ตั้ง": a.location || '-', "ผู้รับผิดชอบ": a.owner, "สถานะป้าย": a.tag,
         "สภาพดี/ปกติ": a.status === 'ดี' ? '✓' : '', "สภาพชำรุด": a.status === 'ชำรุด' ? '✓' : '',
-        "สภาพสูญหาย": a.status === 'สูญหาย' ? '✓' : '', "จำนวนรูปถ่าย": imgCountOf(a) > 0 ? `${imgCountOf(a)} รูป` : 'ไม่มีรูปถ่าย', "หมายเหตุ": a.remark || ''
+        "สภาพสูญหาย": a.status === 'สูญหาย' ? '✓' : '', "จำนวนรูปถ่าย": imgCountOf(a) > 0 ? `${imgCountOf(a)} รูป` : 'ไม่มีรูปถ่าย', "ตรวจโดย": a.status ? (a.checkedBy || '') : '', "วันเวลาที่ตรวจ": a.status ? fmtCheckedAt(a.checkedAt) : '', "หมายเหตุ": a.remark || ''
       }));
       const wb = XLSX.utils.book_new();
       const ws = XLSX.utils.json_to_sheet(excelData);
@@ -2707,6 +2794,18 @@
       XLSX.writeFile(wb, `ป้ายต้องทำใหม่_${String(currentCompany).replace(/[\\/:*?"<>|]/g, '_')}_${today}.xlsx`);
     }
   </script>
+  <!-- ถามชื่อผู้ตรวจ (ครั้งแรกของเครื่อง) -->
+  <div id="inspectorModal" class="hidden fixed inset-0 z-[95] bg-black/50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-5 space-y-3">
+      <div>
+        <h3 class="font-bold text-slate-900">ชื่อผู้ตรวจนับ</h3>
+        <p class="text-xs text-slate-500 mt-0.5">ใช้บันทึกว่าใครเป็นคนตรวจแต่ละรายการ · จำไว้ในเครื่องนี้ ไม่ต้องกรอกอีก</p>
+      </div>
+      <input id="inspectorNameInput" type="text" maxlength="40" placeholder="เช่น สมชาย" onkeydown="if(event.key==='Enter')saveInspectorName()"
+        class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-blue-500">
+      <button onclick="saveInspectorName()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-lg">บันทึก</button>
+    </div>
+  </div>
   <!-- Dashboard ผู้บริหาร (หน้าเต็มจอ) -->
   <div id="execDash" class="hidden fixed inset-0 z-[90] bg-slate-100 overflow-y-auto">
     <div class="max-w-6xl mx-auto px-4 py-4 space-y-3 sm:space-y-4">
