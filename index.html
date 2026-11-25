@@ -3271,8 +3271,7 @@
           <div style="font-size:14px;font-weight:700">รายงานการตรวจนับทรัพย์สินถาวร — ${esc(ctx.label)}</div>
           <div style="font-weight:600">ตรวจแล้ว ${done.toLocaleString()}/${sampled.length.toLocaleString()} (${pct}%) · ดี ${good} · ชำรุด ${dmg} · สูญหาย ${lost} · ยังไม่ตรวจ ${sampled.length - done}${list.length > sampled.length ? ` · เพิ่มใหม่ ${list.length - sampled.length}` : ''}</div>
         </div>
-        ${tables}
-        ${ctx.multi && ctx.dupCount ? `<div style="color:#64748b;margin-top:2px">* เลขทะเบียนซ้ำระหว่าง Tab ${ctx.dupCount.toLocaleString()} รายการ นับครั้งเดียว (ใช้ผลที่ตรวจแล้ว/ล่าสุด)</div>` : ''}`, pdfHint);
+        ${tables}`, pdfHint);
       document.getElementById('signReportBody').style.fontSize = '9.5px';
       // ตัวเลือกคอลัมน์ในหน้า PDF
       document.querySelectorAll('[data-pdfcol]').forEach(cb => { cb.checked = !!opt[cb.dataset.pdfcol]; });
