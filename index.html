@@ -88,58 +88,79 @@
 
     <!-- เมนู: มือถือ = แผ่นเต็มความกว้างใต้แถบหัว, จอใหญ่ = กล่องดรอปดาวน์ทางขวา -->
     <nav id="mobileMenu" class="hidden mt-3 border-t border-slate-700 pt-2 text-sm max-h-[calc(100dvh-10rem)] sm:max-h-[calc(100dvh-6rem)] overflow-y-auto overscroll-contain sm:absolute sm:right-0 sm:top-full sm:mt-2 sm:w-72 sm:bg-slate-900 sm:border sm:rounded-xl sm:shadow-2xl sm:p-2 sm:z-40">
-      <button onclick="closeMobileMenu(); openExecDashboard()" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left font-bold">
-        <i class="fa-solid fa-chart-line w-5 text-center text-blue-400"></i> Dashboard ผู้บริหาร
+      <!-- เมนูแบ่งหมวด: ใช้บ่อยแสดงตลอด · จัดการข้อมูล/ตั้งค่า พับไว้ -->
+      <div class="px-2 pt-1 pb-0.5 text-[11px] font-bold text-slate-400 uppercase tracking-wide">งานตรวจนับ</div>
+      <button onclick="closeMobileMenu(); openTagJob()" class="w-full flex items-center gap-3 px-2 py-2.5 rounded-lg hover:bg-slate-800 text-left">
+        <i class="fa-solid fa-tags w-5 text-center text-lime-400"></i> งานติดป้าย
       </button>
-      <button onclick="closeMobileMenu(); askInspectorName()" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
-        <i class="fa-solid fa-user-check w-5 text-center text-emerald-400"></i> ผู้ตรวจเครื่องนี้: <b id="inspectorMenuName" class="truncate">…</b>
-      </button>
-      <a href="guide.html" target="_blank" rel="noopener" onclick="closeMobileMenu()" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
-        <i class="fa-solid fa-book-open w-5 text-center text-amber-300"></i> คู่มือการใช้งาน
-      </a>
-      <button onclick="closeMobileMenu(); toggleMetaCard(true)" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
-        <i class="fa-solid fa-user-pen w-5 text-center text-slate-300"></i> ผู้ตรวจ และวันที่ตรวจ
-      </button>
-      <button onclick="closeMobileMenu(); openCompanyHistory()" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
+      <button onclick="closeMobileMenu(); openCompanyHistory()" class="w-full flex items-center gap-3 px-2 py-2.5 rounded-lg hover:bg-slate-800 text-left">
         <i class="fa-solid fa-clock-rotate-left w-5 text-center text-sky-400"></i> ประวัติการตรวจ
       </button>
-      <button onclick="closeMobileMenu(); openSignReport()" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
-        <i class="fa-solid fa-file-signature w-5 text-center text-rose-300"></i> พิมพ์รายงานเซ็นรับรอง
+
+      <div class="px-2 pt-3 pb-0.5 text-[11px] font-bold text-slate-400 uppercase tracking-wide border-t border-slate-700 mt-2">รายงาน</div>
+      <button onclick="closeMobileMenu(); openExecDashboard()" class="w-full flex items-center gap-3 px-2 py-2.5 rounded-lg hover:bg-slate-800 text-left">
+        <i class="fa-solid fa-chart-line w-5 text-center text-blue-400"></i> Dashboard ผู้บริหาร
       </button>
-      <button onclick="closeMobileMenu(); chooseExportFormat('report')" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
+      <button onclick="closeMobileMenu(); chooseExportFormat('report')" class="w-full flex items-center gap-3 px-2 py-2.5 rounded-lg hover:bg-slate-800 text-left">
         <i class="fa-solid fa-file-export w-5 text-center text-emerald-400"></i> ส่งออกรายงานตรวจนับ (Excel / PDF)
       </button>
-      <button onclick="closeMobileMenu(); openTagJob()" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
-        <i class="fa-solid fa-tags w-5 text-center text-lime-400"></i> งานติดป้าย (ติ๊กว่าติดแล้ว)
-      </button>
-      <button onclick="closeMobileMenu(); chooseExportFormat('tags')" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
+      <button onclick="closeMobileMenu(); chooseExportFormat('tags')" class="w-full flex items-center gap-3 px-2 py-2.5 rounded-lg hover:bg-slate-800 text-left">
         <i class="fa-solid fa-tags w-5 text-center text-orange-400"></i> ส่งออกรายการป้ายต้องทำใหม่
       </button>
-      <button onclick="closeMobileMenu(); downloadAllImagesZip()" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
+      <button onclick="closeMobileMenu(); openSignReport()" class="w-full flex items-center gap-3 px-2 py-2.5 rounded-lg hover:bg-slate-800 text-left">
+        <i class="fa-solid fa-file-signature w-5 text-center text-rose-300"></i> พิมพ์รายงานเซ็นรับรอง
+      </button>
+      <button onclick="closeMobileMenu(); downloadAllImagesZip()" class="w-full flex items-center gap-3 px-2 py-2.5 rounded-lg hover:bg-slate-800 text-left">
         <i class="fa-solid fa-file-zipper w-5 text-center text-violet-400"></i> โหลดรูปทั้งหมด (.zip)
       </button>
-      <label class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 cursor-pointer">
-        <i class="fa-solid fa-file-import w-5 text-center text-amber-400"></i> นำเข้าไฟล์ Excel
-        <input type="file" accept=".xlsx, .xls, .csv" onchange="closeMobileMenu(); importExcelFile(event)" class="hidden">
-      </label>
-      <button onclick="closeMobileMenu(); downloadExcelTemplate()" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
-        <i class="fa-solid fa-file-arrow-down w-5 text-center text-sky-400"></i> โหลดฟอร์มสำหรับนำเข้า
-      </button>
-      <button onclick="closeMobileMenu(); openTrashModal()" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
-        <i class="fa-solid fa-folder-minus w-5 text-center text-amber-400"></i> ถังขยะ (<span id="trashCountBadgeMobile">…</span>)
-      </button>
-      <button onclick="closeMobileMenu(); openImageTrashModal()" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
-        <i class="fa-solid fa-image w-5 text-center text-purple-400"></i> ถังขยะรูป (<span id="imgTrashCountBadgeMobile">…</span>)
-      </button>
-      <button onclick="closeMobileMenu(); renameCurrentCompany()" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
-        <i class="fa-solid fa-pen-to-square w-5 text-center text-slate-300"></i> เปลี่ยนชื่อ Tab บริษัทนี้
-      </button>
-      <button onclick="closeMobileMenu(); DEMO ? (location.href = location.pathname) : window.open(location.pathname + '?demo', '_blank')" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
-        <i class="fa-solid fa-flask w-5 text-center text-orange-400"></i> <span data-demo-label>โหมดทดลอง (ข้อมูลจาก backup)</span>
-      </button>
-      <button onclick="closeMobileMenu(); confirmDeleteCurrentCompany()" class="w-full flex items-center gap-3 px-2 py-3 mt-1 rounded-lg hover:bg-slate-800 text-left text-red-400 border-t border-slate-700">
-        <i class="fa-solid fa-triangle-exclamation w-5 text-center"></i> ลบบริษัทนี้ (ย้ายไปถังขยะ)
-      </button>
+
+      <details class="group border-t border-slate-700 mt-2">
+        <summary class="list-none cursor-pointer flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-slate-300 font-medium">
+          <i class="fa-solid fa-database w-5 text-center text-slate-400"></i> <span class="flex-1">จัดการข้อมูล</span>
+          <span class="text-[11px] text-slate-500">ถังขยะ <span id="trashCountBadgeMobile">…</span></span>
+          <i class="fa-solid fa-chevron-down text-[10px] text-slate-500 group-open:rotate-180 transition-transform"></i>
+        </summary>
+        <div class="pl-4">
+          <label class="w-full flex items-center gap-3 px-2 py-2.5 rounded-lg hover:bg-slate-800 cursor-pointer">
+            <i class="fa-solid fa-file-import w-5 text-center text-amber-400"></i> นำเข้าไฟล์ Excel
+            <input type="file" accept=".xlsx, .xls, .csv" onchange="closeMobileMenu(); importExcelFile(event)" class="hidden">
+          </label>
+          <button onclick="closeMobileMenu(); downloadExcelTemplate()" class="w-full flex items-center gap-3 px-2 py-2.5 rounded-lg hover:bg-slate-800 text-left">
+            <i class="fa-solid fa-file-arrow-down w-5 text-center text-sky-400"></i> โหลดฟอร์มสำหรับนำเข้า
+          </button>
+          <button onclick="closeMobileMenu(); openTrashModal()" class="w-full flex items-center gap-3 px-2 py-2.5 rounded-lg hover:bg-slate-800 text-left">
+            <i class="fa-solid fa-folder-minus w-5 text-center text-amber-400"></i> ถังขยะ
+          </button>
+          <button onclick="closeMobileMenu(); openImageTrashModal()" class="w-full flex items-center gap-3 px-2 py-2.5 rounded-lg hover:bg-slate-800 text-left">
+            <i class="fa-solid fa-image w-5 text-center text-purple-400"></i> ถังขยะรูป (<span id="imgTrashCountBadgeMobile">…</span>)
+          </button>
+          <button onclick="closeMobileMenu(); renameCurrentCompany()" class="w-full flex items-center gap-3 px-2 py-2.5 rounded-lg hover:bg-slate-800 text-left">
+            <i class="fa-solid fa-pen-to-square w-5 text-center text-slate-300"></i> เปลี่ยนชื่อ Tab บริษัทนี้
+          </button>
+          <button onclick="closeMobileMenu(); confirmDeleteCurrentCompany()" class="w-full flex items-center gap-3 px-2 py-2.5 rounded-lg hover:bg-slate-800 text-left text-red-400">
+            <i class="fa-solid fa-triangle-exclamation w-5 text-center"></i> ลบบริษัทนี้ (ย้ายไปถังขยะ)
+          </button>
+        </div>
+      </details>
+
+      <details class="group border-t border-slate-700">
+        <summary class="list-none cursor-pointer flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-slate-300 font-medium">
+          <i class="fa-solid fa-gear w-5 text-center text-slate-400"></i> <span class="flex-1">ตั้งค่า</span>
+          <span class="text-[11px] text-slate-500 truncate max-w-[45%]">ผู้ตรวจ: <span id="inspectorMenuName">…</span></span>
+          <i class="fa-solid fa-chevron-down text-[10px] text-slate-500 group-open:rotate-180 transition-transform"></i>
+        </summary>
+        <div class="pl-4">
+          <button onclick="closeMobileMenu(); askInspectorName()" class="w-full flex items-center gap-3 px-2 py-2.5 rounded-lg hover:bg-slate-800 text-left">
+            <i class="fa-solid fa-user-check w-5 text-center text-emerald-400"></i> เปลี่ยนชื่อผู้ตรวจเครื่องนี้
+          </button>
+          <a href="guide.html" target="_blank" rel="noopener" onclick="closeMobileMenu()" class="w-full flex items-center gap-3 px-2 py-2.5 rounded-lg hover:bg-slate-800 text-left">
+            <i class="fa-solid fa-book-open w-5 text-center text-amber-300"></i> คู่มือการใช้งาน
+          </a>
+          <button onclick="closeMobileMenu(); DEMO ? (location.href = location.pathname) : window.open(location.pathname + '?demo', '_blank')" class="w-full flex items-center gap-3 px-2 py-2.5 rounded-lg hover:bg-slate-800 text-left">
+            <i class="fa-solid fa-flask w-5 text-center text-orange-400"></i> <span data-demo-label>โหมดทดลอง (ข้อมูลจาก backup)</span>
+          </button>
+        </div>
+      </details>
     </nav>
     </div>
   </header>
