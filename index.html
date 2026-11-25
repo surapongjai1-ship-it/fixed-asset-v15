@@ -37,7 +37,7 @@
     }
     @page { size: A4; margin: 10mm 8mm; }
     #signReport table.rpt.compact th, #signReport table.rpt.compact td { padding: 1.5px 4px; line-height: 1.3; }
-    #signReport table.rpt.fixed { table-layout: fixed; }
+    #signReport table.rpt.tbl-fixed { table-layout: fixed; }
     #signReport table.rpt td.one { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     /* บรรทัดเดียว ยาวเกินช่องตัดด้วย … (ให้ได้หน้าละ 50 รายการพอดี — ชื่อเต็มดูได้ใน Excel/แอป) */
     #signReport table.rpt .clip { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -3235,7 +3235,7 @@
       const totalPages = pages.length || 1;
       const tables = pages.map((rows, i) => `
         <div class="pdf-page"${i < pages.length - 1 ? ' style="break-after:page"' : ''}>
-          <table class="rpt compact fixed" style="margin-top:4px">${head}<tbody>${rows}</tbody></table>
+          <table class="rpt compact tbl-fixed" style="margin-top:4px">${head}<tbody>${rows}</tbody></table>
           <div style="text-align:right;color:#64748b;margin-top:2px">หน้า ${i + 1}/${totalPages}</div>
         </div>`).join('');
       showPrintDoc('📄 รายงานตรวจนับ (PDF)', false, `
