@@ -3138,64 +3138,146 @@
 
     // ===================== รายงานผลการตรวจนับ (เซ็นรับรอง) =====================
     // ใช้ข้อมูลของบริษัทที่เปิดอยู่ (โหลดไว้แล้ว ไม่อ่านฐานข้อมูลเพิ่ม)
+    // ===== ขั้นที่ 1: เลือก Tab ที่จะรวมในรายงาน =====
     function openSignReport() {
-      if (assetsLoading) return alert("กำลังโหลดรายการ รอสักครู่แล้วลองใหม่ครับ");
-      const list = assets.filter(a => a.company === currentCompany);
-      const sampled = list.filter(a => a.auditType !== 'นอกสุ่ม');
-      const extras = list.filter(a => a.auditType === 'นอกสุ่ม');
-      const by = (arr, st) => arr.filter(a => a.status === st).length;
-      const S = { total: sampled.length, good: by(sampled, 'ดี'), damage: by(sampled, 'ชำรุด'), lost: by(sampled, 'สูญหาย') };
-      S.done = S.good + S.damage + S.lost; S.todo = S.total - S.done;
-      const pct = S.total ? Math.round(S.done / S.total * 100) : 0;
-      const tagBroken = list.filter(a => a.tag === 'ป้ายชำรุด').length, tagMissing = list.filter(a => a.tag === 'ไม่มีป้าย').length;
+      const box = document.getElementById('signPickList');
+      const names = companyNames.length ? companyNames : [currentCompany];
+      box.innerHTML = names.map(c => {
+        const n = (c === currentCompany && !assetsLoading) ? assets.length : companyCounts[c];
+        return `
+          <label class="flex items-center justify-between gap-2 px-2 py-2 rounded-lg hover:bg-slate-50 cursor-pointer border-b border-slate-100 last:border-0">
+            <span class="flex items-center gap-2 min-w-0">
+              <input type="checkbox" class="sign-pick rounded text-blue-600" value="${esc(c)}" ${c === currentCompany ? 'checked' : ''} onchange="syncSignPick()">
+              <span class="truncate font-medium text-slate-800">${esc(c)}</span>
+            </span>
+            <span class="text-xs text-slate-400 font-mono shrink-0">${n === undefined ? '…' : n.toLocaleString() + ' รายการ'}</span>
+          </label>`;
+      }).join('');
+      document.getElementById('signTitleInput').value = 'รายงานผลการตรวจนับทรัพย์สินถาวร';
+      document.getElementById('signPickMsg').innerText = '';
+      syncSignPick();
+      document.getElementById('signPicker').classList.remove('hidden');
+    }
+    function signPicked() { return [...document.querySelectorAll('.sign-pick')].filter(c => c.checked).map(c => c.value); }
+    function syncSignPick() {
+      const picked = signPicked();
+      // ประมาณโควต้า: Tab ที่ไม่ได้เปิดอยู่ต้องโหลดมาใหม่
+      const reads = picked.filter(c => !(c === currentCompany && !assetsLoading)).reduce((s, c) => s + (companyCounts[c] || 0), 0);
+      document.getElementById('signPickInfo').innerText = picked.length
+        ? `เลือก ${picked.length} Tab` + (reads ? ` · ต้องโหลดเพิ่มประมาณ ${reads.toLocaleString()} รายการ` : '')
+        : 'ยังไม่ได้เลือก';
+      document.getElementById('signPickGo').disabled = !picked.length;
+    }
+    function closeSignPicker() { document.getElementById('signPicker').classList.add('hidden'); }
 
-      // ช่วงวันที่ตรวจ: จากเวลาที่บันทึกไว้ ถ้าไม่มีใช้วันที่ตรวจนับที่กรอกในแอป
-      const times = list.map(a => a.checkedAt && typeof a.checkedAt.toDate === 'function' ? a.checkedAt.toDate() : null).filter(Boolean).sort((x, y) => x - y);
+    // ===== ขั้นที่ 2: โหลดข้อมูล Tab ที่เลือก แล้วสร้างรายงาน =====
+    async function buildSignReport() {
+      const picked = signPicked();
+      if (!picked.length) return;
+      const title = document.getElementById('signTitleInput').value.trim() || 'รายงานผลการตรวจนับทรัพย์สินถาวร';
+      const msg = document.getElementById('signPickMsg');
+      const go = document.getElementById('signPickGo');
+      go.disabled = true;
+      try {
+        const tabs = [];
+        for (const c of picked) {
+          if (c === currentCompany && !assetsLoading) { tabs.push({ name: c, list: assets.filter(a => a.company === c) }); continue; }
+          msg.innerText = `กำลังโหลด "${c}"...`;
+          const snap = await db.collection(ASSETS_COL).where('company', '==', c).get();
+          tabs.push({ name: c, list: snap.docs.map(normalizeAsset) });
+        }
+        msg.innerText = '';
+        closeSignPicker();
+        renderSignReport(tabs, title);
+      } catch (err) {
+        const quota = err && (err.code === 'resource-exhausted' || /quota/i.test(err.message || ''));
+        msg.innerText = quota ? 'โควต้าฐานข้อมูลของวันนี้หมด ลองใหม่หลังประมาณ 15:00 น.' : 'โหลดไม่สำเร็จ: ' + err.message;
+      } finally {
+        go.disabled = false;
+      }
+    }
+
+    // สถิติของรายการชุดหนึ่ง (นับเฉพาะรายการสุ่มเป็น "ตามทะเบียน", นอกสุ่ม = พบเพิ่ม)
+    function signStats(list) {
+      const sampled = list.filter(a => a.auditType !== 'นอกสุ่ม');
+      const by = (st) => sampled.filter(a => a.status === st).length;
+      const S = { total: sampled.length, good: by('ดี'), damage: by('ชำรุด'), lost: by('สูญหาย'),
+        extras: list.length - sampled.length,
+        tagBroken: list.filter(a => a.tag === 'ป้ายชำรุด').length, tagMissing: list.filter(a => a.tag === 'ไม่มีป้าย').length };
+      S.done = S.good + S.damage + S.lost; S.todo = S.total - S.done;
+      S.pct = S.total ? Math.round(S.done / S.total * 100) : 0;
+      return S;
+    }
+
+    function renderSignReport(tabs, title) {
+      const all = tabs.flatMap(t => t.list.map(a => ({ ...a, _tab: t.name })));
+      const S = signStats(all);
+      const multi = tabs.length > 1;
+
+      const times = all.map(a => a.checkedAt && typeof a.checkedAt.toDate === 'function' ? a.checkedAt.toDate() : null).filter(Boolean).sort((x, y) => x - y);
       const dfmt = (d) => d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' });
-      const meta = companyMetadata[currentCompany] || {};
+      const meta = !multi ? (companyMetadata[tabs[0].name] || {}) : {};
       const period = times.length ? (dfmt(times[0]) === dfmt(times.at(-1)) ? dfmt(times[0]) : `${dfmt(times[0])} – ${dfmt(times.at(-1))}`)
         : (meta.date ? dfmt(new Date(meta.date)) : '........................');
 
-      // ผู้ตรวจนับ (จากชื่อที่บันทึกตอนกดสถานะ)
       const people = {};
-      list.filter(isChecked).forEach(a => { if (a.checkedBy) people[a.checkedBy] = (people[a.checkedBy] || 0) + 1; });
+      all.filter(isChecked).forEach(a => { if (a.checkedBy) people[a.checkedBy] = (people[a.checkedBy] || 0) + 1; });
       const peopleList = Object.entries(people).sort((a, b) => b[1] - a[1]);
 
-      const sev = (a) => (a.status === 'สูญหาย' ? 0 : 1);
-      const issues = list.filter(a => a.status === 'ชำรุด' || a.status === 'สูญหาย')
-        .sort((a, b) => sev(a) - sev(b) || (Number(a.id) || 0) - (Number(b.id) || 0));
-      const extrasSorted = extras.slice().sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
-      const row = (cells) => '<tr>' + cells.map(c => `<td${c && c.num ? ' class="num"' : ''}>${(c && typeof c === 'object') ? c.html : esc(c)}</td>`).join('') + '</tr>';
+      const row = (cells) => '<tr>' + cells.map(c => `<td${c && c.num ? ' class="num"' : ''}${c && c.span ? ` colspan="${c.span}"` : ''}>${(c && typeof c === 'object') ? c.html : esc(c)}</td>`).join('') + '</tr>';
       const n = (v) => ({ html: Number(v).toLocaleString(), num: true });
+      const groupHead = (name, cols) => `<tr><td colspan="${cols}" style="background:#f8fafc;font-weight:700">${esc(name)}</td></tr>`;
+      // ตารางรายการ (จัดกลุ่มตาม Tab ถ้ารวมหลาย Tab)
+      const itemTable = (items, statusOf) => {
+        if (!items.length) return '<div>— ไม่มี —</div>';
+        let i = 0, body = '';
+        tabs.forEach(t => {
+          const rows = items.filter(a => a._tab === t.name);
+          if (!rows.length) return;
+          if (multi) body += groupHead(`${t.name} (${rows.length} รายการ)`, 6);
+          body += rows.map(a => row([n(++i), a.code, a.name, a.location || '-', statusOf(a), a.remark || ''])).join('');
+        });
+        return `<table class="rpt"><thead><tr><th class="num">ลำดับ</th><th>เลขทะเบียน</th><th>ชื่อทรัพย์สิน</th><th>สถานที่</th><th>สภาพ</th><th>หมายเหตุ</th></tr></thead><tbody>${body}</tbody></table>`;
+      };
+      const sev = (a) => (a.status === 'สูญหาย' ? 0 : 1);
+      const issues = all.filter(a => a.status === 'ชำรุด' || a.status === 'สูญหาย')
+        .sort((a, b) => sev(a) - sev(b) || (Number(a.id) || 0) - (Number(b.id) || 0));
+      const extras = all.filter(a => a.auditType === 'นอกสุ่ม').sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
+
+      const perTab = multi ? `
+        <div style="margin-top:8px;font-weight:600">แยกตามหน่วยงาน / Tab</div>
+        <table class="rpt" style="margin-top:4px"><thead><tr>
+          <th>หน่วยงาน / Tab</th><th class="num">ตามทะเบียน</th><th class="num">ตรวจแล้ว</th><th class="num">%</th>
+          <th class="num">ชำรุด</th><th class="num">สูญหาย</th><th class="num">ยังไม่ตรวจ</th><th class="num">พบเพิ่ม</th></tr></thead><tbody>
+          ${tabs.map(t => { const s = signStats(t.list); return row([t.name, n(s.total), n(s.done), { html: s.pct + '%', num: true }, n(s.damage), n(s.lost), n(s.todo), n(s.extras)]); }).join('')}
+          ${row([{ html: '<b>รวม</b>' }, n(S.total), n(S.done), { html: S.pct + '%', num: true }, n(S.damage), n(S.lost), n(S.todo), n(S.extras)])}
+        </tbody></table>` : '';
 
       document.getElementById('signReportBody').innerHTML = `
         <div style="text-align:center">
-          <div style="font-size:18px;font-weight:700">รายงานผลการตรวจนับทรัพย์สินถาวร</div>
-          <div style="font-size:15px;font-weight:600;margin-top:2px">${esc(currentCompany)}</div>
+          <div style="font-size:18px;font-weight:700">${esc(title)}</div>
+          <div style="font-size:15px;font-weight:600;margin-top:2px">${multi ? `รวม ${tabs.length} หน่วยงาน: ${esc(tabs.map(t => t.name).join(', '))}` : esc(tabs[0].name)}</div>
           <div style="margin-top:4px;color:#475569">วันที่ตรวจนับ ${esc(period)} &nbsp;·&nbsp; พิมพ์เมื่อ ${esc(new Date().toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' }))}</div>
         </div>
 
-        <h3>1. สรุปผลการตรวจนับ</h3>
+        <h3>1. สรุปผลการตรวจนับ${multi ? ' (รวมทุกหน่วยงานที่เลือก)' : ''}</h3>
         <table class="rpt" style="max-width:120mm">
           ${row(['รายการตามทะเบียน (รายการสุ่ม)', n(S.total)])}
-          ${row([{ html: '<b>ตรวจนับแล้ว</b>' }, { html: `<b>${S.done.toLocaleString()}</b> (${pct}%)`, num: true }])}
+          ${row([{ html: '<b>ตรวจนับแล้ว</b>' }, { html: `<b>${S.done.toLocaleString()}</b> (${S.pct}%)`, num: true }])}
           ${row([{ html: '&nbsp;&nbsp;&nbsp;– สภาพดี / ปกติ' }, n(S.good)])}
           ${row([{ html: '&nbsp;&nbsp;&nbsp;– ชำรุด' }, n(S.damage)])}
           ${row([{ html: '&nbsp;&nbsp;&nbsp;– สูญหาย' }, n(S.lost)])}
           ${row([{ html: S.todo ? '<b style="color:#b45309">ยังไม่ได้ตรวจ</b>' : 'ยังไม่ได้ตรวจ' }, n(S.todo)])}
-          ${row(['พบเพิ่ม (นอกทะเบียน)', n(extras.length)])}
-          ${row(['ป้ายชำรุด / ไม่มีป้าย', { html: `${tagBroken.toLocaleString()} / ${tagMissing.toLocaleString()}`, num: true }])}
+          ${row(['พบเพิ่ม (นอกทะเบียน)', n(S.extras)])}
+          ${row(['ป้ายชำรุด / ไม่มีป้าย', { html: `${S.tagBroken.toLocaleString()} / ${S.tagMissing.toLocaleString()}`, num: true }])}
         </table>
+        ${perTab}
 
         <h3>2. รายการชำรุด / สูญหาย (${issues.length} รายการ)</h3>
-        ${issues.length ? `<table class="rpt"><thead><tr><th class="num">ลำดับ</th><th>เลขทะเบียน</th><th>ชื่อทรัพย์สิน</th><th>สถานที่</th><th>สภาพ</th><th>หมายเหตุ</th></tr></thead><tbody>
-          ${issues.map((a, i) => row([n(i + 1), a.code, a.name, a.location || '-', a.status, a.remark || ''])).join('')}</tbody></table>`
-          : '<div>— ไม่มี —</div>'}
+        ${itemTable(issues, a => a.status)}
 
         <h3>3. รายการที่พบเพิ่ม นอกทะเบียน (${extras.length} รายการ)</h3>
-        ${extras.length ? `<table class="rpt"><thead><tr><th class="num">ลำดับ</th><th>เลขทะเบียน</th><th>ชื่อ / รายละเอียด</th><th>สถานที่</th><th>สภาพ</th><th>หมายเหตุ</th></tr></thead><tbody>
-          ${extrasSorted.map((a, i) => row([n(i + 1), a.code, a.name, a.location || '-', a.status || 'พบแล้ว (ไม่ระบุสภาพ)', a.remark || ''])).join('')}</tbody></table>`
-          : '<div>— ไม่มี —</div>'}
+        ${itemTable(extras, a => a.status || 'พบแล้ว (ไม่ระบุสภาพ)')}
 
         <h3>4. ผู้ตรวจนับ</h3>
         <div>${peopleList.length ? peopleList.map(([nm, c]) => `${esc(nm)} (${c.toLocaleString()} รายการ)`).join(', ')
@@ -3328,6 +3410,24 @@
       <input id="inspectorNameInput" type="text" maxlength="40" placeholder="เช่น สมชาย" onkeydown="if(event.key==='Enter')saveInspectorName()"
         class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-blue-500">
       <button onclick="saveInspectorName()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-lg">บันทึก</button>
+    </div>
+  </div>
+  <!-- เลือก Tab ที่จะรวมในรายงานเซ็นรับรอง -->
+  <div id="signPicker" class="hidden fixed inset-0 z-[91] bg-black/50 flex items-end sm:items-center justify-center sm:p-4" onclick="if(event.target===this)closeSignPicker()">
+    <div class="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col max-h-[85vh]">
+      <div class="flex items-start justify-between gap-2 p-4 pb-2">
+        <div><h3 class="font-bold text-slate-900">📝 รายงานเซ็นรับรอง</h3>
+          <div class="text-[11px] text-slate-500">เลือก Tab ที่จะรวมเป็นรายงานฉบับเดียว (ข้อมูลเดิมไม่ถูกย้าย)</div></div>
+        <button onclick="closeSignPicker()" aria-label="ปิด" class="text-slate-400 hover:text-slate-700 text-lg px-2"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="px-4"><label class="block text-[11px] text-slate-500 mb-1">ชื่อรายงาน</label>
+        <input id="signTitleInput" type="text" maxlength="120" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"></div>
+      <div id="signPickList" class="overflow-y-auto px-2 py-2 mt-2 border-t border-slate-100"></div>
+      <div class="p-4 pt-2 border-t border-slate-100 space-y-1">
+        <div id="signPickInfo" class="text-[11px] text-slate-500"></div>
+        <div id="signPickMsg" class="text-[11px] text-red-600"></div>
+        <button id="signPickGo" onclick="buildSignReport()" class="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold py-2.5 rounded-lg">สร้างรายงาน</button>
+      </div>
     </div>
   </div>
   <!-- รายงานผลการตรวจนับ สำหรับเซ็นรับรอง -->
