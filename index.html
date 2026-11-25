@@ -2191,7 +2191,9 @@
         String(name(a)).localeCompare(String(name(b)), 'th', { numeric: true });
       const list = Object.values(groups);
       list.forEach(g => g.locs.sort((a, b) => byProgress(a, b, x => x.loc)));
-      return list.sort((a, b) => byProgress(a, b, x => x.key));
+      // ยังไม่ครบขึ้นก่อน → กลุ่มที่มีรหัสชั้นขึ้นก่อนสถานที่อื่น → เรียงตามชื่อ (T1F2 ก่อน T1F10)
+      return list.sort((a, b) => ((a.done === a.total) - (b.done === b.total)) || (b.isFloor - a.isFloor) ||
+        String(a.key).localeCompare(String(b.key), 'th', { numeric: true }));
     }
 
     const expandedFloors = new Set();
