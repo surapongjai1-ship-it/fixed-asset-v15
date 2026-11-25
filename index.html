@@ -3171,7 +3171,7 @@
       document.getElementById('signReportBody').innerHTML = `
         <div style="text-align:center">
           <div style="font-size:18px;font-weight:700">รายงานผลการตรวจนับทรัพย์สินถาวร</div>
-          <div style="font-size:15px;font-weight:600;margin-top:2px">บริษัท ${esc(currentCompany)}</div>
+          <div style="font-size:15px;font-weight:600;margin-top:2px">${esc(currentCompany)}</div>
           <div style="margin-top:4px;color:#475569">วันที่ตรวจนับ ${esc(period)} &nbsp;·&nbsp; พิมพ์เมื่อ ${esc(new Date().toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' }))}</div>
         </div>
 
