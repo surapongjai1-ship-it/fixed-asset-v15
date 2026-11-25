@@ -109,6 +109,9 @@
       <button onclick="closeMobileMenu(); chooseExportFormat('report')" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
         <i class="fa-solid fa-file-export w-5 text-center text-emerald-400"></i> ส่งออกรายงานตรวจนับ (Excel / PDF)
       </button>
+      <button onclick="closeMobileMenu(); openTagJob()" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
+        <i class="fa-solid fa-tags w-5 text-center text-lime-400"></i> งานติดป้าย (ติ๊กว่าติดแล้ว)
+      </button>
       <button onclick="closeMobileMenu(); chooseExportFormat('tags')" class="w-full flex items-center gap-3 px-2 py-3 rounded-lg hover:bg-slate-800 text-left">
         <i class="fa-solid fa-tags w-5 text-center text-orange-400"></i> ส่งออกรายการป้ายต้องทำใหม่
       </button>
@@ -2081,6 +2084,11 @@
     }
 
     function onScanResult(found, cleanCode, isContinuous) {
+          if (tagScanMode) {
+            handleTagScan(found, cleanCode);
+            try { html5QrCode.resume(); } catch (e) {}
+            return;
+          }
           if (found) {
             if (found.company !== currentCompany) {
               switchCompany(found.company);
@@ -2300,6 +2308,7 @@
 
 
     function closeScannerModal() {
+      if (tagScanMode) { tagScanMode = false; setTimeout(() => { if (tagJobOpen) { document.getElementById('tagJob').classList.remove('hidden'); renderTagJob(); } }, 0); }
       currentTrack = null;
       document.getElementById('scanQuickPopup').classList.add('hidden');
       document.getElementById('scanNotFoundPopup').classList.add('hidden');
@@ -2611,7 +2620,7 @@
           link(tagFilter === 'ไม่มีป้าย', `setTagFilter('${tagFilter === 'ไม่มีป้าย' ? '' : 'ไม่มีป้าย'}')`, `ไม่มีป้าย <b>${tagMissing}</b>`)
         : '<span class="text-slate-500 px-1.5">ครบทุกรายการ ✓</span>';
       document.getElementById('dashExtras').innerHTML = `
-        <div class="flex items-center flex-wrap gap-0.5"><span class="text-slate-500 w-16 shrink-0">🏷️ ป้าย</span>${tagLine}${(tagBroken || tagMissing) ? `<button onclick="chooseExportFormat('tags')" title="ส่งออกรายการป้ายต้องทำใหม่ (Excel / PDF)" class="ml-auto text-emerald-700 hover:bg-emerald-50 px-1.5 py-0.5 rounded"><i class="fa-solid fa-file-excel"></i> Excel</button>` : ''}</div>
+        <div class="flex items-center flex-wrap gap-0.5"><span class="text-slate-500 w-16 shrink-0">🏷️ ป้าย</span>${tagLine}${(() => { const d = companyAssets.filter(a => tagFixEntry(a)).length; return d ? `<button onclick="openTagJob()" class="px-1.5 py-0.5 rounded text-emerald-700 hover:bg-emerald-50">· ติดแล้ว <b>${d}</b></button>` : ''; })()}${(tagBroken || tagMissing) ? `<button onclick="chooseExportFormat('tags')" title="ส่งออกรายการป้ายต้องทำใหม่ (Excel / PDF)" class="ml-auto text-emerald-700 hover:bg-emerald-50 px-1.5 py-0.5 rounded"><i class="fa-solid fa-file-excel"></i> Excel</button>` : ''}</div>
         <div class="flex items-center flex-wrap gap-0.5"><span class="text-slate-500 w-16 shrink-0">📋 อื่นๆ</span>${
           link(currentFilter === 'สุ่ม', `filterStatus('${currentFilter === 'สุ่ม' ? 'all' : 'สุ่ม'}'); goToList()`, `🎯 สุ่ม <b>${sampled}</b>`)}<span class="text-slate-300">·</span>${
           link(currentFilter === 'นอกสุ่ม', `filterStatus('${currentFilter === 'นอกสุ่ม' ? 'all' : 'นอกสุ่ม'}'); goToList()`, `➕ เพิ่มใหม่ <b>${extra}</b>`)}<span class="text-slate-300">·</span>${
@@ -2619,6 +2628,7 @@
 
       renderLocProgress(companyAssets);
       if (historyMode) renderHistoryModal();
+      if (tagJobOpen) renderTagJob();
     }
 
     // ===================== Dashboard ผู้บริหาร =====================
@@ -3177,6 +3187,130 @@
       XLSX.writeFile(wb, `รายงานตรวจนับ_${safeFile(ctx.label)}_${today}.xlsx`);
     }
 
+    // ===================== งานติดป้าย (ตามรายการป้ายชำรุด / ไม่มีป้าย จนติดครบ) =====================
+    // ไม่มีข้อมูลใหม่: "ต้องติด" = สถานะป้ายชำรุด/ไม่มีป้าย, "ติดแล้ว" = ป้ายเป็น "มีป้าย" และในประวัติมีการเปลี่ยนจากป้ายชำรุด/ไม่มีป้าย
+    const TAG_BAD = ['ป้ายชำรุด', 'ไม่มีป้าย'];
+    let tagJobOpen = false, tagScanMode = false;
+    const tagJobOpenFloors = new Set();
+
+    function tagFixEntry(a) {   // ประวัติล่าสุดที่เปลี่ยนป้ายจากชำรุด/ไม่มี → มีป้าย
+      if (a.tag !== 'มีป้าย' || !Array.isArray(a.history)) return null;
+      const h = a.history.filter(x => x.f === 'tag' && x.to === 'มีป้าย' && TAG_BAD.includes(x.from))
+        .sort((x, y) => String(y.at).localeCompare(String(x.at)))[0];
+      return h || null;
+    }
+    function tagJobItems() {
+      const list = assets.filter(a => a.company === currentCompany);
+      const todo = list.filter(a => TAG_BAD.includes(a.tag));
+      const done = list.filter(a => tagFixEntry(a));
+      return { todo, done };
+    }
+
+    function openTagJob() {
+      if (assetsLoading) return alert("กำลังโหลดรายการ รอสักครู่แล้วลองใหม่ครับ");
+      tagJobOpen = true;
+      document.getElementById('tagJob').classList.remove('hidden');
+      document.body.style.overflow = 'hidden';
+      renderTagJob();
+    }
+    function closeTagJob() {
+      tagJobOpen = false;
+      document.getElementById('tagJob').classList.add('hidden');
+      document.body.style.overflow = '';
+    }
+    function toggleTagFloor(key) {
+      if (tagJobOpenFloors.has(key)) tagJobOpenFloors.delete(key); else tagJobOpenFloors.add(key);
+      renderTagJob();
+    }
+
+    function renderTagJob() {
+      if (!tagJobOpen) return;
+      const { todo, done } = tagJobItems();
+      const total = todo.length + done.length;
+      const pct = total ? Math.round(done.length / total * 100) : 100;
+      document.getElementById('tagJobTitle').innerText = `🏷️ งานติดป้าย — ${currentCompany}`;
+      document.getElementById('tagJobProgress').innerHTML = total
+        ? `<div class="flex justify-between text-xs text-slate-600 mb-1"><span>ติดแล้ว <b class="text-slate-900">${done.length.toLocaleString()}</b> / ${total.toLocaleString()} รายการ</span><b>${pct}%</b></div>
+           <div class="h-2.5 bg-slate-200 rounded-full overflow-hidden"><div class="h-full ${pct === 100 ? 'bg-emerald-500' : 'bg-blue-500'}" style="width:${pct}%"></div></div>`
+        : '';
+      const box = document.getElementById('tagJobList');
+      if (!total) { box.innerHTML = `<div class="text-center text-emerald-600 py-10">✓ ไม่มีรายการที่ต้องติดป้าย</div>`; return; }
+
+      // จัดกลุ่มตามชั้น · ชั้นที่ยังติดไม่ครบขึ้นก่อน
+      const floorOf = (a) => floorKeyOf(a.location) || 'อื่นๆ';
+      const groups = {};
+      todo.forEach(a => (groups[floorOf(a)] = groups[floorOf(a)] || { todo: [], done: [] }).todo.push(a));
+      done.forEach(a => (groups[floorOf(a)] = groups[floorOf(a)] || { todo: [], done: [] }).done.push(a));
+      const nat = (x, y) => String(x).localeCompare(String(y), 'th', { numeric: true });
+      const keys = Object.keys(groups).sort((a, b) => (!groups[a].todo.length - !groups[b].todo.length) || ((a === 'อื่นๆ') - (b === 'อื่นๆ')) || nat(a, b));
+      const byId = (a, b) => nat(a.location || '', b.location || '') || (Number(a.id) || 0) - (Number(b.id) || 0);
+      const when = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); };
+
+      box.innerHTML = keys.map(k => {
+        const g = groups[k];
+        const n = g.todo.length + g.done.length;
+        const full = !g.todo.length;
+        const open = tagJobOpenFloors.has(k);
+        const head = `
+          <button onclick="toggleTagFloor(${js(k)})" class="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-slate-50">
+            <i class="fa-solid fa-chevron-${open ? 'down' : 'right'} text-[10px] text-slate-400 w-3"></i>
+            <span class="font-bold ${full ? 'text-slate-400' : 'text-slate-800'}">${esc(k)}</span>
+            <span class="flex-1 h-1.5 bg-slate-200 rounded-full overflow-hidden mx-2"><span class="block h-full ${full ? 'bg-emerald-500' : 'bg-blue-500'}" style="width:${Math.round(g.done.length / n * 100)}%"></span></span>
+            <span class="text-xs font-mono ${full ? 'text-emerald-600' : 'text-slate-500'}">${full ? '✓ ' : ''}${g.done.length}/${n}</span>
+          </button>`;
+        if (!open) return `<div class="border-b border-slate-100">${head}</div>`;
+        const row = (a, isDone) => {
+          const h = isDone ? tagFixEntry(a) : null;
+          return `
+            <div class="flex items-center gap-2 px-3 py-2 border-t border-slate-100 ${isDone ? 'bg-emerald-50/50' : ''}">
+              <div class="min-w-0 flex-1">
+                <div class="text-sm ${isDone ? 'text-slate-500' : 'text-slate-800'} truncate"><span class="font-mono text-xs text-slate-500">#${esc(a.id || '-')}</span> ${esc(a.name || '')}</div>
+                <div class="text-[11px] text-slate-500 truncate"><span class="font-mono text-blue-700">${esc(a.code)}</span> · 📍 ${esc(a.location || '-')}${isDone ? '' : ` · <span class="${a.tag === 'ป้ายชำรุด' ? 'text-amber-600' : 'text-red-600'}">${esc(a.tag)}</span>`}</div>
+                ${isDone && h ? `<div class="text-[11px] text-emerald-700">✓ ติดแล้ว · ${esc(h.by)} · ${esc(when(h.at))}</div>` : ''}
+              </div>
+              ${isDone
+                ? `<button onclick="undoTagDone(${js(a.docId)})" class="shrink-0 text-xs text-slate-500 hover:text-red-600 border border-slate-200 rounded-lg px-2.5 py-2">ยกเลิก</button>`
+                : `<button onclick="markTagDone(${js(a.docId)})" class="shrink-0 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg px-3 py-2"><i class="fa-solid fa-check mr-1"></i>ติดแล้ว</button>`}
+            </div>`;
+        };
+        return `<div class="border-b border-slate-100">${head}${g.todo.sort(byId).map(a => row(a, false)).join('')}${g.done.sort(byId).map(a => row(a, true)).join('')}</div>`;
+      }).join('');
+    }
+
+    // ติดป้ายแล้ว → สถานะป้าย "มีป้าย" + ประวัติ (ใคร เมื่อไหร่)
+    async function markTagDone(docId, silent) {
+      const a = assets.find(x => x.docId === docId);
+      if (!a || !TAG_BAD.includes(a.tag)) return false;
+      const name = await ensureInspectorName();
+      db.collection(ASSETS_COL).doc(docId).update({ tag: 'มีป้าย', history: addHistory(historyEntry('tag', a.tag, 'มีป้าย', name)) })
+        .catch(err => alert("บันทึกไม่สำเร็จ: " + err.message));
+      if (!silent) showToast(savedMsg(`ติดป้าย #${a.id || ''} `));
+      return true;
+    }
+    async function undoTagDone(docId) {
+      const a = assets.find(x => x.docId === docId);
+      const h = a && tagFixEntry(a);
+      if (!h) return;
+      if (!confirm(`ยกเลิก "ติดแล้ว" ของ #${a.id || ''} ${a.code}?\nสถานะป้ายจะกลับเป็น "${h.from}"`)) return;
+      const name = await ensureInspectorName();
+      db.collection(ASSETS_COL).doc(docId).update({ tag: h.from, history: addHistory(historyEntry('tag', 'มีป้าย', h.from, name)) })
+        .catch(err => alert("บันทึกไม่สำเร็จ: " + err.message));
+    }
+
+    // สแกนป้ายที่เพิ่งติด → ติ๊ก "ติดแล้ว" ให้เอง (ยืนยันด้วยว่าป้ายอ่านได้จริง)
+    function startTagScan() {
+      tagScanMode = true;
+      document.getElementById('tagJob').classList.add('hidden');
+      openScannerModal();
+      showToast('โหมดสแกนติดป้าย: สแกนป้ายที่เพิ่งติด ระบบจะติ๊กให้เอง');
+    }
+    function handleTagScan(found, cleanCode) {
+      if (!found) { showToast(`ไม่พบเลข ${cleanCode} ในระบบ`); return; }
+      if (TAG_BAD.includes(found.tag) && found.company === currentCompany) { markTagDone(found.docId, true); showToast(`✓ ติดป้ายแล้ว #${found.id || ''} ${found.code}`); return; }
+      if (found.tag === 'มีป้าย') { showToast(`#${found.id || ''} ${found.code} มีป้ายอยู่แล้ว`); return; }
+      showToast(`${found.code} อยู่ใน Tab "${found.company}" — เปิด Tab นั้นก่อน`);
+    }
+
     // ===================== ส่งออก: เลือก Tab + รูปแบบ (PDF / Excel) =====================
     function chooseExportFormat(kind) { openTabPicker(kind === 'tags' ? 'tags' : 'report'); }
 
@@ -3623,6 +3757,21 @@
   </div>
   <div id="demoBanner" class="hidden fixed inset-0 z-[98] pointer-events-none border-4 border-orange-500">
     <div class="absolute top-0 left-1/2 -translate-x-1/2 bg-orange-500 text-white text-[11px] font-bold px-3 py-0.5 rounded-b-lg shadow">🧪 โหมดทดลอง · ข้อมูลจาก backup · ไม่บันทึกจริง</div>
+  </div>
+  <!-- งานติดป้าย -->
+  <div id="tagJob" class="hidden fixed inset-0 z-[86] bg-slate-100 overflow-y-auto">
+    <div class="sticky top-0 z-10 bg-white border-b border-slate-200 shadow-sm">
+      <div class="max-w-3xl mx-auto px-4 py-3 space-y-2">
+        <div class="flex items-center gap-2">
+          <h2 id="tagJobTitle" class="font-bold text-slate-900 flex-1 truncate">🏷️ งานติดป้าย</h2>
+          <button onclick="startTagScan()" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold px-3 py-2 rounded-lg"><i class="fa-solid fa-qrcode mr-1"></i>สแกนติดป้าย</button>
+          <button onclick="closeTagJob()" aria-label="ปิด" class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm px-3 py-2 rounded-lg"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div id="tagJobProgress"></div>
+        <div class="text-[11px] text-slate-500">กดชั้นเพื่อดูรายการ · ติดเสร็จกด <b>✓ ติดแล้ว</b> หรือกด <b>สแกนติดป้าย</b> แล้วสแกนป้ายที่เพิ่งติด</div>
+      </div>
+    </div>
+    <div id="tagJobList" class="max-w-3xl mx-auto bg-white my-3 rounded-xl border border-slate-200 overflow-hidden"></div>
   </div>
   <!-- ประวัติการตรวจ (รายการเดียว / ทั้งบริษัท) -->
   <div id="historyModal" class="hidden fixed inset-0 z-[85] bg-black/50 flex items-end sm:items-center justify-center sm:p-4" onclick="if(event.target===this)closeHistoryModal()">
