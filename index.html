@@ -107,6 +107,9 @@
       <button onclick="closeMobileMenu(); chooseExportFormat('tags')" class="w-full flex items-center gap-3 px-2 py-2.5 rounded-lg hover:bg-slate-800 text-left">
         <i class="fa-solid fa-tags w-5 text-center text-orange-400"></i> ส่งออกรายการป้ายต้องทำใหม่
       </button>
+      <button onclick="closeMobileMenu(); openRounds()" class="w-full flex items-center gap-3 px-2 py-2.5 rounded-lg hover:bg-slate-800 text-left">
+        <i class="fa-solid fa-layer-group w-5 text-center text-cyan-300"></i> รอบการตรวจ (ปิดรอบ / ดูรอบเก่า)
+      </button>
       <button onclick="closeMobileMenu(); openSignReport()" class="w-full flex items-center gap-3 px-2 py-2.5 rounded-lg hover:bg-slate-800 text-left">
         <i class="fa-solid fa-file-signature w-5 text-center text-rose-300"></i> พิมพ์รายงานเซ็นรับรอง
       </button>
@@ -201,7 +204,7 @@
     <!-- Executive Summary Dashboard -->
     <div class="bg-white rounded-xl p-3.5 shadow-sm border border-slate-200 space-y-2.5">
       <div class="flex justify-between items-center text-xs">
-        <span class="font-bold text-slate-700"><i class="fa-solid fa-chart-pie text-blue-600 mr-1"></i> สรุปผลการตรวจนับ (<span id="activeCompanyLabel">SKYAI</span>)</span>
+        <span class="font-bold text-slate-700"><i class="fa-solid fa-chart-pie text-blue-600 mr-1"></i> สรุปผลการตรวจนับ (<span id="activeCompanyLabel">SKYAI</span>) <button onclick="openRounds()" id="roundLabel" class="ml-1 text-[11px] font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 px-1.5 py-0.5 rounded">รอบที่ 1</button></span>
         <span id="progressBadge" class="font-bold bg-blue-50 text-blue-700 px-2.5 py-0.5 rounded-full">0 / 0 (0%)</span>
       </div>
 
@@ -655,7 +658,15 @@
       const W = {
         set: (c, id, data, opts) => ({ validate() {}, apply() {
           const m = col(c);
-          m.set(id, applyData(opts && opts.merge && m.has(id) ? m.get(id) : {}, data)); return c; } }),
+          const merge = opts && opts.merge;
+          const deep = (target, src) => {   // merge:true รวม map ซ้อนกันทีละชั้น
+            for (const [k, v] of Object.entries(src)) {
+              if (v && typeof v === 'object' && !Array.isArray(v) && !v.__demoOp && !(v instanceof DemoTimestamp) && target[k] && typeof target[k] === 'object' && !Array.isArray(target[k])) deep(target[k], v);
+              else applyData(target, { [k]: v });
+            }
+            return target;
+          };
+          m.set(id, merge && m.has(id) ? deep(m.get(id), data) : applyData({}, data)); return c; } }),
         update: (c, id, data) => ({ validate() { if (!col(c).has(id)) throw new Error(`No document to update: ${c}/${id}`); },
           apply() { applyData(col(c).get(id), data); return c; } }),
         delete: (c, id) => ({ validate() {}, apply() { col(c).delete(id); return c; } }),
@@ -843,6 +854,7 @@
       // รายชื่อบริษัทมาจากเอกสารเล็ก ๆ skyai_meta/companies, จำนวนบน Tab มาจากการนับฝั่งเซิร์ฟเวอร์
       try { currentCompany = localStorage.getItem('skyai_last_company') || currentCompany; } catch (e) {}
       watchCompanyList();
+      watchRoundsMeta();
 
       // ถังขยะไม่โหลดตอนเปิดแอปแล้ว (หนัก ~12 MB) ขอแค่ตัวเลขจำนวนจาก Firestore
       // ตัวข้อมูลจะโหลดตอนกดเปิดถังขยะ (ensureTrashListener / ensureImageTrashListener)
@@ -982,6 +994,7 @@
     function addHistory(entry) { return FieldValueImpl.arrayUnion(entry); }
     const HISTORY_FIELD_LABEL = { status: 'สภาพ', tag: 'ป้าย', add: 'เพิ่มรายการนอกสุ่ม' };
     function historyText(h) {
+      if (h.f === 'round') return Number(h.to) > Number(h.from) ? `ปิดรอบที่ ${h.from} → เริ่มรอบที่ ${h.to}` : `เปิดรอบที่ ${h.to} กลับมา`;
       if (h.f === 'add') return `เพิ่มรายการนอกสุ่ม${h.to ? ` (สภาพ: ${h.to})` : ''}`;
       const v = (x) => x || (h.f === 'status' ? 'ยังไม่ตรวจ' : '-');
       return `${HISTORY_FIELD_LABEL[h.f] || h.f}: ${v(h.from)} → ${v(h.to)}${h.photo ? ' (ถ่ายรูปยืนยัน)' : ''}`;
@@ -2648,6 +2661,10 @@
           link(onlyWithPhotos, onlyWithPhotos ? 'onPhotoOnlyChange(false); renderLocationCheckboxes(); updateDashboard()' : 'showOnlyWithPhotos()', `📸 มีรูป <b>${withPhotos}</b>`)}</div>`;
 
       renderLocProgress(companyAssets);
+      if (typeof currentRoundOf === 'function') {
+        const r = currentRoundOf(currentCompany);
+        document.getElementById('roundLabel').innerText = `รอบที่ ${r.no}${r.resetPending ? ' ⚠️' : ''}`;
+      }
       if (historyMode) renderHistoryModal();
       if (tagJobOpen) renderTagJob();
     }
@@ -3206,6 +3223,236 @@
       }
       const today = new Date().toISOString().slice(0, 10);
       XLSX.writeFile(wb, `รายงานตรวจนับ_${safeFile(ctx.label)}_${today}.xlsx`);
+    }
+
+    // ===================== รอบการตรวจ (ปิดรอบ / เริ่มรอบใหม่ใน Tab เดิม) =====================
+    // ผลรอบที่ปิดแล้วเก็บเป็น "ภาพนิ่ง" ใน skyai_rounds (ก้อนละ ≤400 รายการ) — ดูย้อนหลังอ่านแค่ไม่กี่เอกสาร
+    // เลขรอบปัจจุบันของแต่ละ Tab อยู่ที่ skyai_meta/rounds  { [Tab]: { current, startedAt, resetPending } }
+    const ROUNDS_COL = 'skyai_rounds';
+    const roundsMetaRef = () => db.collection('skyai_meta').doc('rounds');
+    const TimestampImpl = DEMO ? demoStore.fsMod.Timestamp : firebase.firestore.Timestamp;
+    let roundsMeta = {};
+    let roundsOpen = false, roundsCache = null;   // roundsCache = { company, rounds: [{ no, closedAt, ..., items }] }
+
+    function watchRoundsMeta() {
+      roundsMetaRef().onSnapshot(s => {
+        roundsMeta = (s.exists && s.data()) || {};
+        updateDashboard();
+        if (roundsOpen) renderRounds();
+      }, () => {});
+    }
+    function currentRoundOf(c) {
+      const m = roundsMeta[c] || {};
+      return { no: Number(m.current) || 1, startedAt: m.startedAt || null, resetPending: !!m.resetPending };
+    }
+    function roundStats(list) {
+      const sampled = list.filter(a => a.auditType !== 'นอกสุ่ม');
+      const by = (st) => sampled.filter(a => a.status === st).length;
+      const s = { total: list.length, register: sampled.length, good: by('ดี'), damage: by('ชำรุด'), lost: by('สูญหาย'), extras: list.length - sampled.length,
+        tagBroken: list.filter(a => a.tag === 'ป้ายชำรุด').length, tagMissing: list.filter(a => a.tag === 'ไม่มีป้าย').length };
+      s.todo = s.register - s.good - s.damage - s.lost;
+      return s;
+    }
+    // ภาพนิ่งแบบย่อของรายการ 1 ชิ้น (ชื่อฟิลด์สั้น ประหยัดพื้นที่)
+    function snapItem(a) {
+      const at = isChecked(a) && a.checkedAt && typeof a.checkedAt.toDate === 'function' ? a.checkedAt.toDate().toISOString() : '';
+      return { d: a.docId, i: a.id || '', c: a.code || '', n: a.name || '', l: a.location || '', g: a.category || '', s: a.status || '', t: a.tag || '',
+        b: isChecked(a) ? (a.checkedBy || '') : '', a: at, r: a.remark || '', x: a.auditType === 'นอกสุ่ม' ? 1 : 0 };
+    }
+    function unsnapItem(o, company) {
+      return { docId: o.d, id: o.i, code: o.c, name: o.n, location: o.l, category: o.g, status: o.s, tag: o.t, checkedBy: o.b,
+        checkedAt: o.a ? { toDate: () => new Date(o.a) } : null, remark: o.r, auditType: o.x ? 'นอกสุ่ม' : 'สุ่ม', company, images: [], imageCount: 0, history: [] };
+    }
+    const dShort = (iso) => { const d = iso ? new Date(iso) : null; return d && !isNaN(d) ? d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' }) : ''; };
+
+    // ---------- หน้า "รอบการตรวจ" ----------
+    async function openRounds() {
+      if (assetsLoading) return alert("กำลังโหลดรายการ รอสักครู่แล้วลองใหม่ครับ");
+      roundsOpen = true;
+      document.getElementById('roundsModal').classList.remove('hidden');
+      document.getElementById('roundsBody').innerHTML = '<div class="text-center text-slate-400 text-sm py-8"><i class="fa-solid fa-spinner fa-spin mr-1"></i> กำลังโหลดรอบที่ผ่านมา...</div>';
+      await loadRounds(currentCompany);
+      renderRounds();
+    }
+    function closeRounds() { roundsOpen = false; document.getElementById('roundsModal').classList.add('hidden'); }
+    async function loadRounds(company) {
+      try {
+        const snap = await db.collection(ROUNDS_COL).where('company', '==', company).get();
+        const byNo = {};
+        snap.docs.forEach(d => {
+          const x = d.data();
+          const r = byNo[x.roundNo] || (byNo[x.roundNo] = { no: x.roundNo, closedAt: x.closedAt, closedBy: x.closedBy, startedAt: x.startedAt, stats: x.stats, parts: x.parts, docIds: [], items: [] });
+          r.docIds.push(d.id);
+          r.items.push(...(x.items || []).map(o => ({ ...o, _p: x.part })));
+        });
+        const rounds = Object.values(byNo).sort((a, b) => b.no - a.no);
+        rounds.forEach(r => { r.complete = new Set(r.items.map(o => o._p)).size === r.parts; });
+        roundsCache = { company, rounds };
+      } catch (err) {
+        roundsCache = { company, rounds: [], error: err.message };
+      }
+    }
+    function renderRounds() {
+      if (!roundsOpen) return;
+      const box = document.getElementById('roundsBody');
+      const { no, startedAt, resetPending } = currentRoundOf(currentCompany);
+      const list = assets.filter(a => a.company === currentCompany);
+      const cur = roundStats(list);
+      const rounds = (roundsCache && roundsCache.company === currentCompany) ? roundsCache.rounds : [];
+      const stat = (s) => `${s.register.toLocaleString()} รายการ · ดี ${s.good} · ชำรุด ${s.damage} · หาย ${s.lost}${s.todo ? ` · ค้าง ${s.todo}` : ''}`;
+      document.getElementById('roundsTitle').innerText = `📚 รอบการตรวจ — ${currentCompany}`;
+      box.innerHTML = `
+        ${resetPending ? `<div class="bg-amber-50 border border-amber-300 text-amber-800 rounded-lg p-3 text-sm">⚠️ การเริ่มรอบที่ ${no} ยังทำไม่เสร็จ (เน็ตหลุดระหว่างทาง) <button onclick="finishRoundReset()" class="ml-2 bg-amber-600 text-white rounded px-2 py-1 text-xs font-bold">ทำต่อให้เสร็จ</button></div>` : ''}
+        <div class="border-2 border-blue-300 bg-blue-50/60 rounded-xl p-3">
+          <div class="flex items-baseline justify-between gap-2"><b class="text-blue-800">● รอบปัจจุบัน · รอบที่ ${no}</b><span class="text-xs text-slate-500">${startedAt ? 'เริ่ม ' + esc(dShort(startedAt)) : ''}</span></div>
+          <div class="text-sm text-slate-700 mt-0.5">ตรวจแล้ว ${(cur.register - cur.todo).toLocaleString()}/${cur.register.toLocaleString()} · ดี ${cur.good} · ชำรุด ${cur.damage} · หาย ${cur.lost}</div>
+          ${rounds[0] ? `<button onclick="showRoundCompare(${rounds[0].no})" class="mt-2 text-xs text-blue-700 underline">เทียบกับรอบที่ ${rounds[0].no}</button>` : ''}
+          <div id="roundCompare" class="mt-2"></div>
+        </div>
+        ${roundsCache && roundsCache.error ? `<div class="text-red-600 text-sm">โหลดรอบที่ผ่านมาไม่สำเร็จ: ${esc(roundsCache.error)}</div>` : ''}
+        ${rounds.length ? rounds.map(r => `
+          <div class="border border-slate-200 rounded-xl p-3">
+            <div class="flex items-baseline justify-between gap-2"><b class="text-slate-800">○ รอบที่ ${r.no}</b>
+              <span class="text-xs text-slate-500">${r.startedAt ? esc(dShort(r.startedAt)) + ' – ' : ''}${esc(dShort(r.closedAt))} · ปิดโดย ${esc(r.closedBy || '-')}</span></div>
+            <div class="text-sm text-slate-600 mt-0.5">${esc(stat(r.stats))}</div>
+            ${r.complete ? `<div class="flex gap-2 mt-2">
+              <button onclick="exportRound(${r.no}, 'pdf')" class="text-xs bg-rose-600 hover:bg-rose-700 text-white rounded-lg px-3 py-1.5"><i class="fa-solid fa-file-pdf mr-1"></i>PDF</button>
+              <button onclick="exportRound(${r.no}, 'excel')" class="text-xs bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg px-3 py-1.5"><i class="fa-solid fa-file-excel mr-1"></i>Excel</button>
+            </div>` : `<div class="text-xs text-red-600 mt-1">ข้อมูลรอบนี้ไม่ครบ</div>`}
+          </div>`).join('') : '<div class="text-center text-slate-400 text-sm py-3">ยังไม่เคยปิดรอบ</div>'}
+        <div class="border-t border-slate-200 pt-3 space-y-2">
+          <button onclick="closeRound()" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-2.5 rounded-lg"><i class="fa-solid fa-lock mr-1"></i> ปิดรอบที่ ${no} และเริ่มรอบที่ ${no + 1}</button>
+          ${rounds[0] && rounds[0].no === no - 1 && rounds[0].complete ? `<button onclick="reopenLastRound()" class="w-full text-sm text-slate-500 hover:text-red-600 py-1">↩ เปิดรอบที่ ${no - 1} กลับมา (ยกเลิกการปิดรอบล่าสุด)</button>` : ''}
+        </div>`;
+    }
+
+    // ---------- ส่งออกผลรอบเก่า (ใช้ PDF/Excel ตัวเดียวกับรอบปัจจุบัน) ----------
+    function exportRound(no, format) {
+      const r = roundsCache && roundsCache.rounds.find(x => x.no === no);
+      if (!r) return;
+      const label = `${currentCompany} รอบที่ ${no}`;
+      const items = r.items.map(o => ({ ...unsnapItem(o, currentCompany), _tab: label }))
+        .sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
+      const ctx = { tabs: [label], multi: false, items, raw: items, dupCount: 0, conflicts: [], label };
+      closeRounds();
+      format === 'pdf' ? openAuditReportPdf(ctx) : exportToExcelClean(ctx);
+    }
+
+    // ---------- เทียบรอบปัจจุบันกับรอบก่อน ----------
+    function showRoundCompare(no) {
+      const r = roundsCache && roundsCache.rounds.find(x => x.no === no);
+      if (!r) return;
+      const prev = new Map(r.items.map(o => [o.d, o]));
+      const worse = { 'ดี': 0, 'ชำรุด': 1, 'สูญหาย': 2 };
+      const rows = [];
+      assets.filter(a => a.company === currentCompany).forEach(a => {
+        const o = prev.get(a.docId);
+        if (!o || !a.status || !o.s || a.status === o.s) return;
+        rows.push({ a, from: o.s, to: a.status, bad: (worse[a.status] || 0) > (worse[o.s] || 0) });
+      });
+      rows.sort((x, y) => (y.bad - x.bad) || (Number(x.a.id) || 0) - (Number(y.a.id) || 0));
+      document.getElementById('roundCompare').innerHTML = rows.length
+        ? `<div class="text-xs text-slate-500 mb-1">เปลี่ยนจากรอบที่ ${no}: ${rows.length} รายการ (นับเฉพาะที่ตรวจแล้วทั้งสองรอบ)</div>` + rows.map(x => `
+            <div class="text-xs py-1 border-t border-blue-100 flex gap-2">
+              <span class="font-mono text-blue-700 shrink-0">#${esc(x.a.id || '')} ${esc(x.a.code)}</span>
+              <span class="truncate flex-1">${esc(x.a.name || '')}</span>
+              <span class="shrink-0 ${x.bad ? 'text-red-600 font-bold' : 'text-emerald-700'}">${esc(x.from)} → ${esc(x.to)}</span>
+            </div>`).join('')
+        : `<div class="text-xs text-slate-500">ยังไม่มีรายการที่ผลต่างจากรอบที่ ${no}</div>`;
+    }
+
+    // ---------- ปิดรอบ ----------
+    async function closeRound() {
+      if (!DEMO && !navigator.onLine) return alert('ต้องต่ออินเทอร์เน็ตก่อน (ปิดรอบทำตอนออฟไลน์ไม่ได้)');
+      const company = currentCompany;
+      const list = assets.filter(a => a.company === company);
+      if (!list.length) return alert('Tab นี้ยังไม่มีรายการ');
+      const { no, startedAt, resetPending } = currentRoundOf(company);
+      if (resetPending) return alert('การเริ่มรอบที่ ' + no + ' ยังไม่เสร็จ กด "ทำต่อให้เสร็จ" ก่อน');
+      const S = roundStats(list);
+      const typed = prompt(
+        `ปิดรอบที่ ${no} ของ "${company}"\n\n` +
+        `• เก็บผลรอบนี้ ${list.length.toLocaleString()} รายการไว้ ดูย้อนหลัง/ส่งออกได้\n` +
+        `• ทุกรายการกลับเป็น "ยังไม่ตรวจ" เพื่อเริ่มรอบที่ ${no + 1}\n` +
+        `• สถานะป้าย รูป และประวัติ คงไว้ · รายการเพิ่มใหม่ (นอกสุ่ม) จะเป็นรายการปกติในรอบหน้า` +
+        (S.todo ? `\n\n⚠️ ยังไม่ตรวจอีก ${S.todo.toLocaleString()} รายการ` : '') +
+        `\n\nพิมพ์ชื่อ Tab "${company}" เพื่อยืนยัน`);
+      if (typed === null) return;
+      if (typed.trim() !== company) return alert('ชื่อ Tab ไม่ตรง ยกเลิกการปิดรอบ');
+      const name = await ensureInspectorName();
+      const items = list.map(snapItem);
+      const PART = 400, parts = Math.max(1, Math.ceil(items.length / PART));
+      const closedAt = new Date().toISOString();
+      try {
+        showProgress('กำลังเก็บผลรอบ...');
+        // 1) เก็บผลรอบ + เลื่อนเลขรอบ (พร้อมธง resetPending) ใน batch เดียว — ถ้าไม่สำเร็จ ไม่มีอะไรเปลี่ยน
+        const batch = db.batch();
+        for (let p = 0; p < parts; p++) {
+          batch.set(db.collection(ROUNDS_COL).doc(), { company, roundNo: no, part: p, parts, closedAt, closedBy: name, startedAt, stats: S, items: items.slice(p * PART, (p + 1) * PART) });
+        }
+        batch.set(roundsMetaRef(), { [company]: { current: no + 1, startedAt: closedAt, resetPending: true } }, { merge: true });
+        await batch.commit();
+        // 2) รีเซ็ตรายการ (ทีละชุด) แล้วปลดธง
+        await resetItemsForRound(company, no, name);
+        alert(`ปิดรอบที่ ${no} แล้ว · เริ่มรอบที่ ${no + 1}\nดูผลรอบที่ ${no} ได้ที่ ☰ เมนู → รอบการตรวจ`);
+      } catch (err) {
+        alert('ปิดรอบไม่สำเร็จ: ' + err.message + '\nถ้าผลรอบถูกเก็บแล้ว จะมีปุ่ม "ทำต่อให้เสร็จ" ในหน้ารอบการตรวจ');
+      } finally {
+        hideProgress();
+        if (roundsOpen) { await loadRounds(company); renderRounds(); }
+      }
+    }
+    // รีเซ็ตเฉพาะรายการที่ยังไม่มีประวัติ "ปิดรอบที่ no" (ทำซ้ำได้ ไม่รีเซ็ตซ้ำ)
+    async function resetItemsForRound(company, no, name) {
+      const done = (a) => (a.history || []).some(h => h.f === 'round' && h.from === String(no) && h.to === String(no + 1));
+      const todo = assets.filter(a => a.company === company && !done(a));
+      const entry = historyEntry('round', String(no), String(no + 1), name);
+      await commitInChunks(todo, (batch, a) => batch.update(db.collection(ASSETS_COL).doc(a.docId), {
+        status: '', checkedBy: FieldValueImpl.delete(), checkedAt: FieldValueImpl.delete(),
+        ...(a.auditType === 'นอกสุ่ม' ? { auditType: 'สุ่ม', addedInRound: no } : {}),
+        history: addHistory(entry),
+      }), 'กำลังเริ่มรอบใหม่');
+      await roundsMetaRef().set({ [company]: { resetPending: false } }, { merge: true });
+    }
+    async function finishRoundReset() {
+      if (!DEMO && !navigator.onLine) return alert('ต้องต่ออินเทอร์เน็ตก่อน');
+      const { no } = currentRoundOf(currentCompany);
+      try { await resetItemsForRound(currentCompany, no - 1, await ensureInspectorName()); }
+      catch (err) { alert('ยังไม่สำเร็จ: ' + err.message); }
+    }
+
+    // ---------- เปิดรอบล่าสุดกลับมา (ยกเลิกการปิดรอบ) ----------
+    async function reopenLastRound() {
+      if (!DEMO && !navigator.onLine) return alert('ต้องต่ออินเทอร์เน็ตก่อน');
+      const company = currentCompany;
+      const { no } = currentRoundOf(company);
+      const r = roundsCache && roundsCache.rounds.find(x => x.no === no - 1);
+      if (!r || !r.complete) return;
+      const checkedNow = assets.filter(a => a.company === company && a.status).length;
+      if (!confirm(`เปิดรอบที่ ${r.no} กลับมา?\n\nผลของทุกรายการจะกลับเป็นผลรอบที่ ${r.no}` +
+        (checkedNow ? `\n⚠️ ผลที่ตรวจไปแล้วในรอบที่ ${no} (${checkedNow} รายการ) จะถูกแทนที่` : '') +
+        `\nรอบที่ ${r.no} จะกลับมาเป็นรอบปัจจุบัน`)) return;
+      const name = await ensureInspectorName();
+      const exists = new Set(assets.filter(a => a.company === company).map(a => a.docId));
+      const items = r.items.filter(o => exists.has(o.d));   // รายการที่ถูกลบไปแล้วข้าม
+      const entry = historyEntry('round', String(no), String(r.no), name);
+      try {
+        await commitInChunks(items, (batch, o) => batch.update(db.collection(ASSETS_COL).doc(o.d), {
+          status: o.s || '', checkedBy: o.b ? o.b : FieldValueImpl.delete(),
+          checkedAt: o.a ? TimestampImpl.fromDate(new Date(o.a)) : FieldValueImpl.delete(),
+          ...(o.x ? { auditType: 'นอกสุ่ม' } : {}),
+          history: addHistory(entry),
+        }), 'กำลังเปิดรอบเดิม');
+        const batch = db.batch();
+        r.docIds.forEach(id => batch.delete(db.collection(ROUNDS_COL).doc(id)));
+        batch.set(roundsMetaRef(), { [company]: { current: r.no, startedAt: r.startedAt || null, resetPending: false } }, { merge: true });
+        await batch.commit();
+        alert(`เปิดรอบที่ ${r.no} กลับมาแล้ว`);
+      } catch (err) {
+        alert('ไม่สำเร็จ: ' + err.message);
+      } finally {
+        await loadRounds(company); renderRounds();
+      }
     }
 
     // ===================== งานติดป้าย (ตามรายการป้ายชำรุด / ไม่มีป้าย จนติดครบ) =====================
@@ -3829,6 +4076,16 @@
   </div>
   <div id="demoBanner" class="hidden fixed inset-0 z-[98] pointer-events-none border-4 border-orange-500">
     <div class="absolute top-0 left-1/2 -translate-x-1/2 bg-orange-500 text-white text-[11px] font-bold px-3 py-0.5 rounded-b-lg shadow">🧪 โหมดทดลอง · ข้อมูลจาก backup · ไม่บันทึกจริง</div>
+  </div>
+  <!-- รอบการตรวจ -->
+  <div id="roundsModal" class="hidden fixed inset-0 z-[85] bg-black/50 flex items-end sm:items-center justify-center sm:p-4" onclick="if(event.target===this)closeRounds()">
+    <div class="bg-white w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col max-h-[88vh]">
+      <div class="flex items-start justify-between gap-2 p-4 pb-2">
+        <h3 id="roundsTitle" class="font-bold text-slate-900 truncate">📚 รอบการตรวจ</h3>
+        <button onclick="closeRounds()" aria-label="ปิด" class="text-slate-400 hover:text-slate-700 text-lg px-2"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div id="roundsBody" class="overflow-y-auto px-4 pb-4 space-y-2"></div>
+    </div>
   </div>
   <!-- งานติดป้าย -->
   <div id="tagJob" class="hidden fixed inset-0 z-[86] bg-slate-100 overflow-y-auto">
