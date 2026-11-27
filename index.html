@@ -2450,9 +2450,18 @@
       try { localStorage.setItem('skyai_last_company', company); } catch (e) {}
       subscribeCompany(company);
       currentPage = 1;
+      // สลับบริษัท = ล้างตัวกรองทุกตัว (เดิมแท็บสถานะกับคำค้นหาค้างไว้ ทำให้บริษัทใหม่ดูเหมือนไม่มีรายการ)
       selectedLocations = [];
       onlyWithPhotos = false;
       tagFilter = '';
+      currentFilter = 'all';
+      const searchBox = document.getElementById('searchInput');
+      if (searchBox) searchBox.value = '';
+      const kwInput = document.getElementById('locationKeywordInput');
+      if (kwInput) kwInput.value = '';
+      document.querySelectorAll('.filter-tab').forEach(btn => btn.className = "filter-tab px-3 py-1.5 sm:py-1 rounded-md font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap");
+      const allTab = document.getElementById('tab-all');
+      if (allTab) allTab.className = "filter-tab px-3 py-1.5 sm:py-1 rounded-md font-medium bg-blue-600 text-white whitespace-nowrap shadow-sm";
       syncLocationFilterLabel();
       updateCompanyTabs();
       syncMetaUI();
