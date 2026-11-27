@@ -3393,7 +3393,7 @@
         batch.set(roundsMetaRef(), { [company]: { current: no + 1, startedAt: closedAt, resetPending: true } }, { merge: true });
         await batch.commit();
         // 2) รีเซ็ตรายการ (ทีละชุด) แล้วปลดธง
-        await resetItemsForRound(company, no, name);
+        await resetItemsForRound(company, no, name, closedAt);
         alert(`ปิดรอบที่ ${no} แล้ว · เริ่มรอบที่ ${no + 1}\nดูผลรอบที่ ${no} ได้ที่ ☰ เมนู → รอบการตรวจ`);
       } catch (err) {
         alert('ปิดรอบไม่สำเร็จ: ' + err.message + '\nถ้าผลรอบถูกเก็บแล้ว จะมีปุ่ม "ทำต่อให้เสร็จ" ในหน้ารอบการตรวจ');
@@ -3402,9 +3402,10 @@
         if (roundsOpen) { await loadRounds(company); renderRounds(); }
       }
     }
-    // รีเซ็ตเฉพาะรายการที่ยังไม่มีประวัติ "ปิดรอบที่ no" (ทำซ้ำได้ ไม่รีเซ็ตซ้ำ)
-    async function resetItemsForRound(company, no, name) {
-      const done = (a) => (a.history || []).some(h => h.f === 'round' && h.from === String(no) && h.to === String(no + 1));
+    // รีเซ็ตเฉพาะรายการที่ยังไม่มีประวัติ "ปิดรอบที่ no" ของการปิดครั้งนี้ (นับเฉพาะประวัติหลังเวลาปิดรอบ — กรณีเคยเปิดรอบกลับมาแล้วปิดใหม่)
+    async function resetItemsForRound(company, no, name, closedAt) {
+      const since = closedAt || '';
+      const done = (a) => (a.history || []).some(h => h.f === 'round' && h.from === String(no) && h.to === String(no + 1) && String(h.at) >= since);
       const todo = assets.filter(a => a.company === company && !done(a));
       const entry = historyEntry('round', String(no), String(no + 1), name);
       await commitInChunks(todo, (batch, a) => batch.update(db.collection(ASSETS_COL).doc(a.docId), {
@@ -3416,8 +3417,8 @@
     }
     async function finishRoundReset() {
       if (!DEMO && !navigator.onLine) return alert('ต้องต่ออินเทอร์เน็ตก่อน');
-      const { no } = currentRoundOf(currentCompany);
-      try { await resetItemsForRound(currentCompany, no - 1, await ensureInspectorName()); }
+      const { no, startedAt } = currentRoundOf(currentCompany);
+      try { await resetItemsForRound(currentCompany, no - 1, await ensureInspectorName(), startedAt); }
       catch (err) { alert('ยังไม่สำเร็จ: ' + err.message); }
     }
 
