@@ -108,7 +108,7 @@
         <i class="fa-solid fa-tags w-5 text-center text-orange-400"></i> ส่งออกรายการป้ายต้องทำใหม่
       </button>
       <button onclick="closeMobileMenu(); openRounds()" class="w-full flex items-center gap-3 px-2 py-2.5 rounded-lg hover:bg-slate-800 text-left">
-        <i class="fa-solid fa-layer-group w-5 text-center text-cyan-300"></i> รอบการตรวจ (ปิดรอบ / ดูรอบเก่า)
+        <i class="fa-solid fa-layer-group w-5 text-center text-cyan-300"></i> รอบการตรวจ (จบการตรวจ / ดูรอบเก่า)
       </button>
       <button onclick="closeMobileMenu(); openSignReport()" class="w-full flex items-center gap-3 px-2 py-2.5 rounded-lg hover:bg-slate-800 text-left">
         <i class="fa-solid fa-file-signature w-5 text-center text-rose-300"></i> พิมพ์รายงานเซ็นรับรอง
@@ -3304,7 +3304,7 @@
       box.innerHTML = `
         ${resetPending ? `<div class="bg-amber-50 border border-amber-300 text-amber-800 rounded-lg p-3 text-sm">⚠️ การเริ่มรอบที่ ${no} ยังทำไม่เสร็จ (เน็ตหลุดระหว่างทาง) <button onclick="finishRoundReset()" class="ml-2 bg-amber-600 text-white rounded px-2 py-1 text-xs font-bold">ทำต่อให้เสร็จ</button></div>` : ''}
         <div class="border-2 border-blue-300 bg-blue-50/60 rounded-xl p-3">
-          <div class="flex items-baseline justify-between gap-2"><b class="text-blue-800">● รอบปัจจุบัน · รอบที่ ${no}</b><span class="text-xs text-slate-500">${startedAt ? 'เริ่ม ' + esc(dShort(startedAt)) : ''}</span></div>
+          <div class="flex items-baseline justify-between gap-2"><b class="text-blue-800">● กำลังตรวจ · รอบที่ ${no}</b><span class="text-xs text-slate-500">${startedAt ? 'เริ่ม ' + esc(dShort(startedAt)) : ''}</span></div>
           <div class="text-sm text-slate-700 mt-0.5">ตรวจแล้ว ${(cur.register - cur.todo).toLocaleString()}/${cur.register.toLocaleString()} · ดี ${cur.good} · ชำรุด ${cur.damage} · หาย ${cur.lost}</div>
           ${rounds[0] ? `<button onclick="showRoundCompare(${rounds[0].no})" class="mt-2 text-xs text-blue-700 underline">เทียบกับรอบที่ ${rounds[0].no}</button>` : ''}
           <div id="roundCompare" class="mt-2"></div>
@@ -3319,10 +3319,11 @@
               <button onclick="exportRound(${r.no}, 'pdf')" class="text-xs bg-rose-600 hover:bg-rose-700 text-white rounded-lg px-3 py-1.5"><i class="fa-solid fa-file-pdf mr-1"></i>PDF</button>
               <button onclick="exportRound(${r.no}, 'excel')" class="text-xs bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg px-3 py-1.5"><i class="fa-solid fa-file-excel mr-1"></i>Excel</button>
             </div>` : `<div class="text-xs text-red-600 mt-1">ข้อมูลรอบนี้ไม่ครบ</div>`}
-          </div>`).join('') : '<div class="text-center text-slate-400 text-sm py-3">ยังไม่เคยปิดรอบ</div>'}
+          </div>`).join('') : '<div class="text-center text-slate-400 text-sm py-3">ยังไม่มีรอบที่จบแล้ว</div>'}
         <div class="border-t border-slate-200 pt-3 space-y-2">
-          <button onclick="closeRound()" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-2.5 rounded-lg"><i class="fa-solid fa-lock mr-1"></i> ปิดรอบที่ ${no} และเริ่มรอบที่ ${no + 1}</button>
-          ${rounds[0] && rounds[0].no === no - 1 && rounds[0].complete ? `<button onclick="reopenLastRound()" class="w-full text-sm text-slate-500 hover:text-red-600 py-1">↩ เปิดรอบที่ ${no - 1} กลับมา (ยกเลิกการปิดรอบล่าสุด)</button>` : ''}
+          <div class="text-xs text-slate-600 bg-slate-50 rounded-lg p-2.5">💡 ตรวจหลายวันได้ ข้อมูลอยู่ครบ <b>ไม่ต้องกดอะไรตอนเลิกงาน</b><br>กดปุ่มด้านล่าง<b>ครั้งเดียวตอนจบการตรวจทั้งครั้ง</b> (ตรวจครบ และส่งรายงาน/เซ็นรับรองแล้ว) เพื่อเก็บผลไว้และเตรียมรายการสำหรับการตรวจครั้งหน้า</div>
+          <button onclick="closeRound()" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-2.5 rounded-lg leading-tight"><i class="fa-solid fa-flag-checkered mr-1"></i> จบการตรวจครั้งนี้ (ปิดรอบที่ ${no})<span class="block text-[11px] font-normal opacity-80 mt-0.5">แล้วเตรียมรอบที่ ${no + 1} สำหรับการตรวจครั้งหน้า</span></button>
+          ${rounds[0] && rounds[0].no === no - 1 && rounds[0].complete ? `<button onclick="reopenLastRound()" class="w-full text-sm text-slate-500 hover:text-red-600 py-1">↩ กดจบการตรวจผิด? เปิดรอบที่ ${no - 1} กลับมาตรวจต่อ</button>` : ''}
         </div>`;
     }
 
@@ -3371,14 +3372,14 @@
       if (resetPending) return alert('การเริ่มรอบที่ ' + no + ' ยังไม่เสร็จ กด "ทำต่อให้เสร็จ" ก่อน');
       const S = roundStats(list);
       const typed = prompt(
-        `ปิดรอบที่ ${no} ของ "${company}"\n\n` +
+        `จบการตรวจครั้งนี้ (ปิดรอบที่ ${no}) ของ "${company}"\n\nกดเมื่อตรวจครบและส่งรายงานแล้วเท่านั้น — ถ้ายังตรวจไม่เสร็จ ให้กดยกเลิก แล้วตรวจต่อได้เลย\n\n` +
         `• เก็บผลรอบนี้ ${list.length.toLocaleString()} รายการไว้ ดูย้อนหลัง/ส่งออกได้\n` +
         `• ทุกรายการกลับเป็น "ยังไม่ตรวจ" เพื่อเริ่มรอบที่ ${no + 1}\n` +
         `• สถานะป้าย รูป และประวัติ คงไว้ · รายการเพิ่มใหม่ (นอกสุ่ม) จะเป็นรายการปกติในรอบหน้า` +
-        (S.todo ? `\n\n⚠️ ยังไม่ตรวจอีก ${S.todo.toLocaleString()} รายการ` : '') +
+        (S.todo ? `\n\n⚠️ ยังไม่ตรวจอีก ${S.todo.toLocaleString()} รายการ — ยังไม่ควรจบการตรวจ` : '') +
         `\n\nพิมพ์ชื่อ Tab "${company}" เพื่อยืนยัน`);
       if (typed === null) return;
-      if (typed.trim() !== company) return alert('ชื่อ Tab ไม่ตรง ยกเลิกการปิดรอบ');
+      if (typed.trim() !== company) return alert('ชื่อ Tab ไม่ตรง ยกเลิกแล้ว (ยังไม่ได้จบการตรวจ)');
       const name = await ensureInspectorName();
       const items = list.map(snapItem);
       const PART = 400, parts = Math.max(1, Math.ceil(items.length / PART));
@@ -3394,7 +3395,7 @@
         await batch.commit();
         // 2) รีเซ็ตรายการ (ทีละชุด) แล้วปลดธง
         await resetItemsForRound(company, no, name, closedAt);
-        alert(`ปิดรอบที่ ${no} แล้ว · เริ่มรอบที่ ${no + 1}\nดูผลรอบที่ ${no} ได้ที่ ☰ เมนู → รอบการตรวจ`);
+        alert(`จบการตรวจรอบที่ ${no} แล้ว · พร้อมสำหรับการตรวจครั้งหน้า (รอบที่ ${no + 1})\nดูผลรอบที่ ${no} ได้ที่ ☰ เมนู → รอบการตรวจ`);
       } catch (err) {
         alert('ปิดรอบไม่สำเร็จ: ' + err.message + '\nถ้าผลรอบถูกเก็บแล้ว จะมีปุ่ม "ทำต่อให้เสร็จ" ในหน้ารอบการตรวจ');
       } finally {
